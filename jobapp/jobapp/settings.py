@@ -25,19 +25,20 @@ SECRET_KEY = 'j$(gvg1n8hc%^9ys%j%dgyindj^$#ah9mdwagb3=ufybe5ue&&'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    #'django.contrib.admin',
+    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'jobapp.jobapp',
+    'graphene_django',
 ]
 
 MIDDLEWARE = [
@@ -118,6 +119,7 @@ USE_L10N = True
 
 USE_TZ = True
 
+GRAPHENE = {"SCHEMA": "jobapp.jobapp.graphql_.schema.schema"}
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/3.0/howto/static-files/

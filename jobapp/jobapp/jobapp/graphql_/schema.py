@@ -1,27 +1,61 @@
 import graphene
-from graphene_django.types import DjangoObjectType
+from graphene import relay
 from jobapp.jobapp import models
+from django.contrib.auth import models as django_authmodels
+from graphene_django import DjangoObjectType
+from graphene_django.filter import DjangoFilterConnectionField
 
-
-class SchedulerDirector(DjangoObjectType):
+class User(DjangoObjectType):
     class Meta:
-        model = models.SchedulerDirector
+        model = models.User
+        interfaces = (relay.Node, )
+        filter_fields = {
+            "id": ("exact", ),
+            "first_name": ("icontains", "iexact"),
+            "last_name": ("icontains", "iexact"),
+            "username": ("icontains", "iexact"),
+            "email": ("icontains", "iexact"),
+            "is_staff": ("exact", ),
+        }
 
 
-class ClockNode(DjangoObjectType):
+class Group(DjangoObjectType):
     class Meta:
-        model = models.ClockNode
+        model = django_authmodels.Group
+        interfaces = (relay.Node, )
+        filter_fields = ['name']
+
+
+class Groupset(DjangoObjectType):
+    class Meta:
+        model = models.Groupset
+        interfaces = (relay.Node, )
+        filter_fields = ['name']
+    users = DjangoFilterConnectionField(User)
+    groups = DjangoFilterConnectionField(User)
+
+
+class GroupsetIdpSyncJob(DjangoObjectType):
+    class Meta:
+        model = models.GroupsetIdpSyncJob
+        interfaces = (relay.Node, )
+    
+
+class GroupsetIdpSyncJobDiagnostic(DjangoObjectType):
+    class Meta:
+        model = models.GroupsetIdpSyncJobDiagnostic
+        interfaces = (relay.Node, )
+
+
+class Job(graphene.Union):
+    class Meta:
+        types = (GroupsetIdpSyncJob,)
 
 
 class Query(graphene.ObjectType):
-    all_scheduler_director = graphene.List(SchedulerDirector)
-    all_clock_nodes = graphene.List(ClockNode)
+    all_users = DjangoFilterConnectionField(User)
+    all_groups =  DjangoFilterConnectionField(Group)
+    all_groupset = DjangoFilterConnectionField(Groupset)
+    jobs = graphene.List(Job)
 
-    def resolve_all_scheduler_director(self, info, **kwargs):
-        return models.SchedulerDirector.objects.all()
-
-    def resolve_all_clock_nodes(self, info, **kwargs):
-        return models.ClockNode.objects.all()
-
-
-schema = graphene.Schema(query=Query)
+schema = graphene.Schema(query=Query) 

@@ -2,6 +2,8 @@ import logging
 import time
 import enum
 import django.contrib.postgres.fields as postgres_fields
+from django.db import transaction
+
 from django.utils import timezone
 from datetime import datetime, timedelta
 from django.db import models
@@ -168,8 +170,23 @@ class DefaultJobRunner:
 
 
 ############### DEMO ###########
+
 class User(AbstractUser):
-    pass
+
+    @property
+    def direct_roles(self):
+        return [g.name for g in self.groups.all()]
+
+    @property
+    def groupset_roles(self):
+        return [
+            g.name for gs in self.groupset_set.all()
+            for g in gs.groups.all()
+        ]
+
+    @property
+    def effective_roles(self):
+        return set(self.direct_roles + self.groupset_roles)
 
 
 class Groupset(models.Model):
@@ -178,28 +195,50 @@ class Groupset(models.Model):
     groups = models.ManyToManyField(Group)
 
 
+MOCK_DATA = {
+    'to_add_users': [1, 2, 3, 5, 6, 8],
+    'to_remove_users': [9, 4]
+}
+
 class GroupsetIdpSyncJob(Job):
-    groupset = models.ForeignKey(Groupset, on_delete=models.CASCADE, null=True) # demo only null true
+    groupset = models.ForeignKey(Groupset, on_delete=models.CASCADE) # demo only null true
+
+    @classmethod
+    def sync_with_okta(cls, user):
+        time.sleep(1)
+        print(f'synced effective roles {user.effective_roles}'}
+
+    def add_user(self, user):
+        # Manage trasaction: TODO
+        with transaction.atomic():
+            try:
+                self.groupset.users.add(user)
+                self.groupset.save()
+                self.sync_with_okta(user)
+            except Exception as e:
+                logger.exception(e)
+                print(e)
 
     def act(self):
         self.update_status(status=JobStatus.RUNNING)
         self.publish_state()
-        TOTAL_USERS = 10
+        to_add_users = User.objects.filter(id__in=MOCK_DATA['to_add_users'])
+        TOTAL_USERS = len(to_add_users)
         PROCESSED_USERS = 0
         self.percentage_progress = 0
         self.publish_state()
-        for user_id in range(TOTAL_USERS):
-            time.sleep(1)
+        for user in to_add_users:
             PROCESSED_USERS += 1
             self.percentage_progress = int((PROCESSED_USERS * 100) / TOTAL_USERS)
             self.publish_state()
-            print(f'processed user {user_id}')
+            print(f'processed user {user.username}')
             self.groupsetidpsyncjobdiagnostic_set.create(
                 userid=user_id,
                 job=self,
                 message=f'user processed successfully'
             )
         self.update_status(status=JobStatus.SUCCESS)
+        self.percentage_progress = 100
         self.publish_state()
         print(f'job completed')
 
@@ -210,3 +249,12 @@ class GroupsetIdpSyncJob(Job):
 class GroupsetIdpSyncJobDiagnostic(Diagnostic):
     job = models.ForeignKey(GroupsetIdpSyncJob,  on_delete=models.CASCADE)
     userid = models.IntegerField(null=True)
+    operation = models.CharField(max_length=10, choices=['add', 'remove'])
+
+class DeleteGroupsetJob(GroupsetIdpSyncJob):
+    class Meta:
+        proxy = True
+
+    def act(self):
+        super().act()
+
