@@ -50,35 +50,82 @@ class GroupsetUserSyncJob(
     JobRunnerMixin
 ):
 
-    @classmethod
     def _add_user_to_groupset(self, user, groupset):
         with transaction.atomic():
             try:
                 groupset.users.add(user)
                 groupset.save()
                 user.sync_with_okta()
+                self.add_user_diagnostic(
+                    user=user,
+                    groupset=groupset,
+                    message='Ok',
+                    serverity=Severity.INFO
+                )
             except Exception as e:
                 logger.exception(e)
+                self.add_user_diagnostic(
+                    user=user,
+                    groupset=groupset,
+                    message='Failed to add user',
+                    serverity=Severity.WARNING # TODO depends on type of error
+                )
+            finally:
+                self.report_progress(units=1)
 
-    @classmethod
     def _remove_user_to_groupset(self, user, groupset):
         with transaction.atomic():
             try:
                 groupset.users.remove(user)
                 groupset.save()
                 user.sync_with_okta()
+                self.add_user_diagnostic(
+                    user=user,
+                    groupset=groupset,
+                    message='Ok',
+                    serverity=Severity.INFO
+                )
             except Exception as e:
                 logger.exception(e)
+                self.add_user_diagnostic(
+                    user=user,
+                    groupset=groupset,
+                    message='Failed to remove user',
+                    serverity=Severity.WARNING # TODO depends on type of error
+                )
+            finally:
+                self.report_progress(units=1)
+
+    def _remove_all_users(self, groupset):
+        for user in groupset.users:
+            self._remove_user_from_groupset(user, groupset)
+
+    def _add_all_users(self, groupset):
+        for user in groupset.users:
+            self._add_user_to_groupset(user, groupset)
+
+    def _remove_groupset(self, groupset):
+        self.total_units += 1 # one additional operation to delete group
+        self.notify()
+        self._remove_all_users(groupset)
+        # TODO: delete job and diagnostics history?
+        # Override delete()?
+        with transaction.atomic():
+            groupset.delete()
+        self.report_progress(units=1)
 
     @property
     def data(self):
         # TODO real data
         return [
-            {'operation': 'add', 'groupset_id': 1, 'user_id': 1},
-            {'operation': 'add', 'groupset_id': 1, 'user_id': 1},
-            {'operation': 'remove', 'groupset_id': 1, 'user_id': 4},
-            {'operation': 'remove', 'groupset_id': 1, 'user_id': 5},
-            {'operation': 'add', 'groupset_id': 1, 'user_id': 6},
+            {'operation': 'add_user', 'groupset_id': 1, 'user_id': 1},
+            {'operation': 'add_user', 'groupset_id': 1, 'user_id': 1},
+            {'operation': 'remove_user', 'groupset_id': 1, 'user_id': 4},
+            {'operation': 'remove_user', 'groupset_id': 1, 'user_id': 5},
+            {'operation': 'add_user', 'groupset_id': 1, 'user_id': 6},
+            {'operation': 'add_all_users', 'groupset_id': 4, 'user_id': None},
+            {'operation': 'remove_all_users', 'groupset_id': 5, 'user_id': None},
+            {'operation': 'remove_groupset', 'groupset_id': 7, 'user_id': None},
         ]
 
     def act(self):
@@ -94,16 +141,12 @@ class GroupsetUserSyncJob(
                 self._add_user_to_groupset(user, groupset)
             if operation == 'remove':
                 self._remove_user_to_groupset(user, groupset)
-            print(f'Prcessed: {operation} {user.username} {groupset.name}')
-            self.report_progress(units=1)
-            # handle exception and add dignostics
-            self.add_user_diagnostic(
-                user=user,
-                groupset=groupset,
-                message='Ok',
-                serverity=Severity.INFO
-            )
-        # TODO: remove user from groupset
+            if operation == 'add_all_users':
+                self._add_all_users(groupset)
+            if operation == 'remove_all_users':
+                self._remove_all_users(groupset)
+            if operation == 'remove_groupset':
+                self._remove_groupset(groupset)
         print(f'job completed')
 
     def add_diagnostic(
