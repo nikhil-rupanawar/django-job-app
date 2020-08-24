@@ -257,8 +257,7 @@ class Groupset(models.Model):
 
 
 class GroupsetSyncJob(AbstractJob, JobProgressMixin, JobRunnerMixin):
-    # TODO: Do we need FK? IMO good to have for integrity
-    # groupset = models.ForeignKey(Groupset, on_delete=models.CASCADE)
+    groupset = models.ForeignKey(Groupset, on_delete=models.CASCADE)
 
     @classmethod
     def _add_user_to_groupset(self, user, groupset):
@@ -314,14 +313,14 @@ class GroupsetSyncJob(AbstractJob, JobProgressMixin, JobRunnerMixin):
            'message': message,
         }
         self.groupsetsyncjobdiagnostic_set.create(
-            job=self,
+            job_id=self.id,
             details=details,
             severity=severity
         )
 
 
-class GroupsetSyncJobDiagnostic(AbstractDiagnostic):
-    job = models.ForeignKey(GroupsetSyncJob,  on_delete=models.CASCADE)
+class JobDiagnostic(AbstractDiagnostic):
+    job_id = models.IntegerField() 
 
 
 class DeleteGroupsetJob(GroupsetSyncJob):
