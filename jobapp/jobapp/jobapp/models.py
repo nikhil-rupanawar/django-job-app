@@ -1,4 +1,5 @@
 import logging
+import abc
 import time
 import enum
 import django.contrib.postgres.fields as postgres_fields
@@ -69,7 +70,21 @@ class AbstractDiagnostic(models.Model):
         abstract = True
 
     severity = models.IntegerField(default=Severity.INFO.value)
+    created_by = models.CharField(max_length=255)
+    created_at =  models.DateTimeField(auto_now_add=True)
+    updated_at =  models.DateTimeField(auto_now_add=True)
     details = postgres_fields.JSONField(null=True)
+
+
+class AbstractJobNotifier(abc.ABCMeta):
+    @abc.abstractmethod
+    def notify(self, job):
+        ...
+
+
+class DbSaveNotifier(AbstractJobNotifier):
+    def notify(self, job):
+        job.save()
 
 
 class AbstractJob(models.Model):
@@ -89,6 +104,11 @@ class AbstractJob(models.Model):
     updated_at =  models.DateTimeField(auto_now_add=True)
     ttl = models.IntegerField(default=DEFAULT_TTL_THRESHOLD) # 3 days
 
+    def __init__(self, *args, notifiers=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not notifiers:
+            self._notifiers = (DbSaveNotifier(),)
+
     @property
     def status(self):
         return self._status
@@ -96,27 +116,27 @@ class AbstractJob(models.Model):
     def ui_status(self):
         return self._ui_status
 
-    def acknowledge(self, save=True):
-        self.update_status(status=JobStatus.REQUEST_ACK, save=save)
+    def acknowledge(self, notify=True):
+        self.update_status(status=JobStatus.REQUEST_ACK, notify=notify)
 
-    def running(self, save=True):
-        self.update_status(status=JobStatus.RUNNING, save=save)
+    def running(self, notify=True):
+        self.update_status(status=JobStatus.RUNNING, notify=notify)
 
-    def fail(self, save=True, raise_error=True, reason=''):
-        self.update_status(status=JobStatus.FAILED, save=save)
+    def fail(self, notify=True, raise_error=True, reason=''):
+        self.update_status(status=JobStatus.FAILED, notify=notify)
         if raise_error:
             raise JobFailedError(f'Job failed, reason={reason}')
 
-    def success(self, save=True):
-        self.update_status(status=JobStatus.SUCCESS, save=save)
+    def success(self, notify=True):
+        self.update_status(status=JobStatus.SUCCESS, notify=notify)
 
-    def error(self, save=True):
-        self.update_status(status=JobStatus.ERRORED, save=save)
+    def error(self, notify=True):
+        self.update_status(status=JobStatus.ERRORED, notify=notify)
 
-    def success_with_warning(self, save=True):
-        self.update_status(status=JobStatus.SUCCESS_WITH_WARNING, save=save)
+    def success_with_warning(self, notify=True):
+        self.update_status(status=JobStatus.SUCCESS_WITH_WARNING, notify=notify)
 
-    def update_status(self, status: JobStatus, ui_status: UiStatus=None, save=True):
+    def update_status(self, status: JobStatus, ui_status: UiStatus=None, notify=True):
         assert status or ui_stauts
         self._status = status.value
         if ui_status is not None:
@@ -124,22 +144,28 @@ class AbstractJob(models.Model):
         else:
             mapped_status = getattr(UiStatus, status.name, None)
             if mapped_status is not None:
-                self.update_ui_status(mapped_status, save=False)
+                self.update_ui_status(mapped_status, notify=False)
         self.ping()
-        if save:
-            sellf.save()
+        if notify:
+            self.notify()
 
-    def update_ui_status(self, status: UiStatus, save=True):
+    def update_ui_status(self, status: UiStatus, notify=True):
         self._ui_status = ui_status
-        if save:
-            self.save()
+        if notify:
+            self.notify()
 
     def ping(self):
         self.updated_at = now()
 
-    def publish_state(self):
-        # By default save to the db
-        self.save()
+    @property
+    def notifiers(self):
+        return self._notifiers
+
+    def notify(self):
+        # notifiers are classes which implemets 'notify' method.
+        # and accepts job as first argument
+        for notifier in self.notifiers:
+            notifier.notify(self)
 
     def on_success(self):
         pass
@@ -171,17 +197,17 @@ class AbstractJob(models.Model):
 class JobProgressMixin(models.Model):
     class Meta:
         abstract = True
-    total_units = models.IntegerField(db_column='progress_total_units')
+    total_units = models.IntegerField(db_column='progress_total_units', default=1)
     done_units = models.IntegerField(default=0, db_column='progress_done_units')
     progress_unit = models.CharField(max_length=50)
     progress_unit_plural = models.CharField(max_length=50)
     _progress_percent = models.IntegerField(null=True)
 
-    def report_progress(self, units:int=1, save=True):
-        self.done_units += units
+    def report_progress(self, done_units:int=1, notify=True):
+        self.done_units += done_units
         self.remaining_units
-        if save:
-            self.save()
+        if notify:
+            self.notify()
 
     @property
     def remaaining_units(self):
@@ -229,100 +255,3 @@ class JobRunnerMixin:
         finally:
             self.finalize()
 
-
-############### DEMO ###########
-
-class User(AbstractUser):
-
-    @property
-    def direct_roles(self):
-        return [g.name for g in self.groups.all()]
-
-    @property
-    def groupset_roles(self):
-        return [
-            g.name for gs in self.groupset_set.all()
-            for g in gs.groups.all()
-        ]
-
-    @property
-    def effective_roles(self):
-        return set(self.direct_roles + self.groupset_roles)
-
-
-class Groupset(models.Model):
-    name = models.CharField(max_length=255)
-    users = models.ManyToManyField(User)
-    groups = models.ManyToManyField(Group)
-
-
-class GroupsetSyncJob(AbstractJob, JobProgressMixin, JobRunnerMixin):
-    groupset = models.ForeignKey(Groupset, on_delete=models.CASCADE)
-
-    @classmethod
-    def _add_user_to_groupset(self, user, groupset):
-        with transaction.atomic():
-            try:
-                groupset.users.add(user)
-                groupset.save()
-                user.save()
-                user.sync_with_okta()
-            except Exception as e:
-                logger.exception(e)
-                print(e)
-   
-    @property
-    def data(self):
-        # TODO real data
-        return {
-           'groupset_id': 1,
-           'to_add_users': [1, 2, 3, 5, 6, 8],
-           'to_remove_users': [9, 4]
-        }
-
-    def act(self):
-        groupset = Groupset.objects.get(id=self.data['groupset_id'])
-        to_add_users = User.objects.filter(id__in=self.data['to_add_users'])
-        for user in to_add_users:
-            self._add_user_to_groupset(groupset, user)
-            print(f'Processed user {user.username}')
-            self.report_progress(units=1)
-            # handle exception and add dignostics
-            self.add_user_diagnostic(
-                user=user,
-                groupset=groupset,
-                job=self,
-                message=f'User {user.username} added successfully.',
-                serverity=Severity.INFO
-            )
-        # TODO: remove user from groupset
-        print(f'job completed')
-
-    def add_user_diagnostic(
-        self,
-        user,
-        groupset,
-        messagge=None,
-        operation=None,
-        severity=Severity.INFO
-    ):
-        details = {
-           'groupset_id': groupset.id,
-           'user_id': user.id,
-           'operation': operation,
-           'message': message,
-        }
-        self.groupsetsyncjobdiagnostic_set.create(
-            job_id=self.id,
-            details=details,
-            severity=severity
-        )
-
-
-class JobDiagnostic(AbstractDiagnostic):
-    job_id = models.IntegerField() 
-
-
-class DeleteGroupsetJob(GroupsetSyncJob):
-    class Meta:
-        proxy = True

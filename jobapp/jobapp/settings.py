@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'jobapp.jobapp',
+    'jobapp.rest_api',
     'graphene_django',
 ]
 
@@ -88,7 +89,7 @@ DATABASES = {
 # Password validation
 # https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
 
-AUTH_USER_MODEL = "jobapp.User"
+AUTH_USER_MODEL = "rest_api.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {
