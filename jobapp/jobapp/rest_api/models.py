@@ -44,18 +44,31 @@ class Groupset(models.Model):
     groups = models.ManyToManyField(Group)
 
 
-class GroupsetUserSyncJob(AbstractJob, JobProgressMixin, JobRunnerMixin):
+class GroupsetUserSyncJob(
+    AbstractJob,
+    JobProgressMixin,
+    JobRunnerMixin
+):
+
     @classmethod
     def _add_user_to_groupset(self, user, groupset):
         with transaction.atomic():
             try:
                 groupset.users.add(user)
                 groupset.save()
-                user.save()
                 user.sync_with_okta()
             except Exception as e:
                 logger.exception(e)
-                print(e)
+
+    @classmethod
+    def _remove_user_to_groupset(self, user, groupset):
+        with transaction.atomic():
+            try:
+                groupset.users.remove(user)
+                groupset.save()
+                user.sync_with_okta()
+            except Exception as e:
+                logger.exception(e)
 
     @property
     def data(self):
@@ -69,8 +82,6 @@ class GroupsetUserSyncJob(AbstractJob, JobProgressMixin, JobRunnerMixin):
         ]
 
     def act(self):
-        groupset = Groupset.objects.get(id=self.data['groupset_id'])
-        to_add_users = User.objects.filter(id__in=self.data['to_add_users'])
         for entry in self.data.items():
             operation, user_id, groupset_id = (
                 entry['operation'],
@@ -82,7 +93,7 @@ class GroupsetUserSyncJob(AbstractJob, JobProgressMixin, JobRunnerMixin):
             if operation == 'add':
                 self._add_user_to_groupset(user, groupset)
             if operation == 'remove':
-                self._add_user_to_groupset(user, groupset)
+                self._remove_user_to_groupset(user, groupset)
             print(f'Prcessed: {operation} {user.username} {groupset.name}')
             self.report_progress(units=1)
             # handle exception and add dignostics
