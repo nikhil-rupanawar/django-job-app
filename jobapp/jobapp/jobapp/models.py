@@ -74,6 +74,7 @@ class AbstractDiagnostic(models.Model):
     created_at =  models.DateTimeField(auto_now_add=True)
     updated_at =  models.DateTimeField(auto_now_add=True)
     details = postgres_fields.JSONField(null=True)
+    stage = models.CharField(null=True, blank=True, max_length=50)
 
 
 class AbstractJobNotifier(abc.ABCMeta):
@@ -83,8 +84,20 @@ class AbstractJobNotifier(abc.ABCMeta):
 
 
 class DbSaveNotifier(AbstractJobNotifier):
+    """ Simply save the job to db """
     def notify(self, job):
         job.save()
+
+
+def notify(f):
+    @functools.wraps(f)
+    def wrapper(self, *args, **kwargs):
+        try:
+           result = f(self, *args, **kwargs)
+           return result
+        finally:
+           self.notify()
+    return wrapper
 
 
 class AbstractJob(models.Model):
@@ -98,6 +111,7 @@ class AbstractJob(models.Model):
     _ui_status = models.CharField(choices=UiStatus.choices, max_length=255)
     _data = postgres_fields.JSONField(null=True)
     type = models.IntegerField(null=True)
+    stage = models.CharField(null=True, max_length=50)
     created_by = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     created_at =  models.DateTimeField(auto_now_add=True)
@@ -113,30 +127,45 @@ class AbstractJob(models.Model):
     def status(self):
         return self._status
 
+    @property
     def ui_status(self):
         return self._ui_status
 
-    def acknowledge(self, notify=True):
-        self.update_status(status=JobStatus.REQUEST_ACK, notify=notify)
+    @notify
+    def acknowledge(self):
+        self.update_status(status=JobStatus.REQUEST_ACK)
 
-    def running(self, notify=True):
-        self.update_status(status=JobStatus.RUNNING, notify=notify)
+    @notify
+    def running(self):
+        self.update_status(status=JobStatus.RUNNING)
 
-    def fail(self, notify=True, raise_error=True, reason=''):
-        self.update_status(status=JobStatus.FAILED, notify=notify)
+    @notify
+    def fail(self, raise_error=True, reason=''):
+        self.update_status(status=JobStatus.FAILED)
         if raise_error:
             raise JobFailedError(f'Job failed, reason={reason}')
 
-    def success(self, notify=True):
-        self.update_status(status=JobStatus.SUCCESS, notify=notify)
+    @notify
+    def success(self, notify):
+        self.update_status(status=JobStatus.SUCCESS)
 
-    def error(self, notify=True):
-        self.update_status(status=JobStatus.ERRORED, notify=notify)
+    @notify
+    def error(self):
+        self.update_status(status=JobStatus.ERRORED)
 
-    def success_with_warning(self, notify=True):
-        self.update_status(status=JobStatus.SUCCESS_WITH_WARNING, notify=notify)
+    @notify
+    def success_with_warning(self):
+        self.update_status(status=JobStatus.SUCCESS_WITH_WARNING)
 
-    def update_status(self, status: JobStatus, ui_status: UiStatus=None, notify=True):
+    @notify
+    def start_stage(self, stage):
+        self.stage = stage
+
+    @notify
+    def end_stage(self, stage):
+        pass
+
+    def update_status(self, status: JobStatus, ui_status: UiStatus=None):
         assert status or ui_stauts
         self._status = status.value
         if ui_status is not None:
@@ -144,17 +173,14 @@ class AbstractJob(models.Model):
         else:
             mapped_status = getattr(UiStatus, status.name, None)
             if mapped_status is not None:
-                self.update_ui_status(mapped_status, notify=False)
-        self.ping()
-        if notify:
-            self.notify()
+                self.update_ui_status(mapped_status)
+        self.touch()
 
-    def update_ui_status(self, status: UiStatus, notify=True):
+    def update_ui_status(self, status: UiStatus):
         self._ui_status = ui_status
-        if notify:
-            self.notify()
+        self.touch()
 
-    def ping(self):
+    def touch(self):
         self.updated_at = now()
 
     @property
@@ -190,27 +216,33 @@ class AbstractJob(models.Model):
     def is_stale(self):
         return self.has_expired
 
-    def publish_job_request(self):
-        pass
-
 
 class JobProgressMixin(models.Model):
     class Meta:
         abstract = True
-    total_units = models.IntegerField(db_column='progress_total_units', default=1)
-    done_units = models.IntegerField(default=0, db_column='progress_done_units')
-    progress_unit = models.CharField(max_length=50)
-    progress_unit_plural = models.CharField(max_length=50)
+    _total_units = models.IntegerField(db_column='progress_total_units', default=0)
+    _done_units = models.IntegerField(default=0, db_column='progress_done_units', default=0)
     _progress_percent = models.IntegerField(null=True)
+    progress_unit = models.CharField(max_length=50, blank=True)
+    progress_unit_plural = models.CharField(max_length=50, blank=True)
+
+
+    def total_units(self):
+        return self._total_units
+
+    def done_units(self):
+        return self._done_units
+
+    def add_units(self, units):
+        _total_units += units
 
     def report_progress(self, done_units:int=1, notify=True):
-        self.done_units += done_units
-        self.remaining_units
+        self._done_units += done_units
         if notify:
             self.notify()
 
     @property
-    def remaaining_units(self):
+    def remaining_units(self):
         return self.total_units - self.done_units
 
     @property
