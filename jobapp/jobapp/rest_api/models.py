@@ -23,19 +23,19 @@ logger = logging.getLogger(__name__)
 class User(AbstractUser):
 
     @property
-    def direct_roles(self):
+    def direct_groups(self):
         return [g.name for g in self.groups.all()]
 
     @property
-    def groupset_roles(self):
+    def groupset_groups(self):
         return [
             g.name for gs in self.groupset_set.all()
             for g in gs.groups.all()
         ]
 
     @property
-    def effective_roles(self):
-        return set(self.direct_roles + self.groupset_roles)
+    def effective_groups(self):
+        return set(self.direct_groups + self.groupset_groups)
 
 
 class Groupset(models.Model):
@@ -57,7 +57,7 @@ class GroupsetSyncJob(
 
     groupset = models.ForeignKey(Groupset, on_delete=models.SET_NULL)
 
-    def _add_user_to_groups(self, user):
+    def add_user(self, user):
         with transaction.atomic():
             try:
                 self.groupset.users.add(user)
@@ -65,6 +65,7 @@ class GroupsetSyncJob(
                 # user sync_with_okta()
                 self.add_diagnostic(
                     user=user,
+                    operation='add_user'
                     message='Roles added successfully.',
                     serverity=Severity.INFO
                 )
@@ -73,21 +74,21 @@ class GroupsetSyncJob(
                 self.add_diagnostic(
                     user=user,
                     groupset=groupset,
-                    message='Failed update roles.',
+                    message='Failed update groups.',
                     serverity=Severity.WARNING # TODO depends on type of error
                 )
             finally:
                 self.report_progress(units=1)
 
-    def _remove_user_to_groupset(self, user, groupset):
+    def remove_user(self, user):
         with transaction.atomic():
             try:
                 groupset.users.remove(user)
                 groupset.save()
                 # user.sync_with_okta()
-                self.add_user_diagnostic(
+                self.add_diagnostic(
                     user=user,
-                    message='Roles removed successfully.',
+                    message='User removed successfully.',
                     serverity=Severity.INFO
                 )
             except Exception as e:
@@ -100,39 +101,23 @@ class GroupsetSyncJob(
             finally:
                 self.report_progress(units=1)
 
-    def _remove_all_users(self, groupset):
+    def remove_all_users(self):
         for user in groupset.users:
-            self._remove_user_from_groupset(user, groupset)
+            self.remove_user(user)
 
-    def _add_all_users(self, groupset):
+    def add_all_users(self):
         for user in groupset.users:
-            self._add_user_to_groupset(user, groupset)
-
-    def _remove_groupset(self, groupset):
-        self.total_units += 1 # one additional operation to delete group
-        self.notify()
-        self._remove_all_users(groupset)
-        # TODO: delete job and diagnostics history?
-        # Override delete()?
-        with transaction.atomic():
-            groupset.delete()
-        self.report_progress(units=1)
+            self.add_user(user)
 
     @property
     def data(self):
         # TODO real data
         return {
-            'operation': 'update_groupset',
-            'assign_role_ids': [1, 4],
-            'remove_role_ids': [7, 8],
+            'assign_group_ids': [1, 4],
+            'remove_group_ids': [7, 8],
             'add_user_ids': [1, 2, 3, 5],
             'remove_user_ids': [4, 6],
         }
-        '''
-        return {
-            'operation': 'delete_groupset'
-        }
-        '''
 
     def start_stage(self, stage):
         super().start_stage()
@@ -142,64 +127,48 @@ class GroupsetSyncJob(
         super().start_stage()
         self.dignostics.create(message=f'Stage completed {self.stage.value}.')
 
-    def _stage_roles_update(self, assign_roles, remove_roles):
+    def _stage_groups_update(self):
         self.start_stage(JobStage.ROLES_UPDATE)
         try:
             with transaction.atomic():
                 # TODO: not found exception
-                role = self.groupset.roles.get(id=role_id)
-                for role_id in assign_role_ids:
-                    self.groupset.roles.add(role)
-                for role_id in assign_role_ids:
-                    self.groupset.roles.remove(role)
-                self.report_progress(len(assign_roles) + len(remove_roles))
+                for group_id in self.data.get('add_group_ids', []):
+                    group = Group.objects.get(id=group_id)
+                    self.groupset.groups.add(group)
+                for group_id in self.data.get('remove_group_ids', []):
+                    group = Group.objects.get(id=group_id)
+                    self.groupset.groups.remove(group)
+                self.report_progress(len(assign_groups) + len(remove_groups))
         except Exception as e:
             logger.exception(e)
-            self.fail(reason=f'Failed to assign roles.')
+            self.fail(reason=f'Failed to assign groups.')
             self.dignostics.create(message=f'Stage failed {self.stage}.', severity=Severity.CRITICAL) 
         finally:
             self.end_stage(JobStage.ROLES_UPDATE)
 
-    def _stage_users_update(self, add_users, remove_users):
+    def _stage_users_update(self):
         self.start_stage(JobStage.USERS_UPDATE)
         try:
-            self._add_users(add_users)
-            self._remove_users(remove_users)
+            for user_id in self.data.get('add_user_ids', []):
+                user = User.objects.get(id=user_id)
+                self._add_users(add_users)
+            for user_id in self.data.get('remove_user_ids', []):
+                user = User.objects.get(id=user_id)
+                self._remove_users(add_users)
         except Exception as e:
             logger.exception(e)
             self.fail(reason=f'Failed to update users.')
         finally:
             self.end_stage(JobStage.USERS_UPDATE)
 
-    def act(self):
-        (op,
-         add_user_ids,
-         remove_user_ids,
-         assign_roles,
-         remove_roles) = (
-            self.data['operation'],
-            self.data['add_user_ids'],
-            self.data['remove_user_ids']
-            self.data['assign_role_ids']
-            self.data['remove_role_ids']
-        )
+    def init_progress(self):
         self.add_units(
-            len(add_user_ids) +
-            len(remove_user_ids) +
-            len(assign_roles) +
-            len(remove_roles) +
+            len(self.data.get('add_user_ids', [])) +
+            len(self.data.get('remove_user_ids', [])) +
+            len(self.data.get('add_group_ids',[])) +
+            len(self.data.get('remove_group_ids', []))
         )
-        if self.type == GroupSyncJobType.CREATE_NEW:
-            self._stage_update_roles(assign_roles, remove_roles)
-            self._stage_update_users(add_user_ids, remove_user_ids)
-        if self.type == GroupSyncJobType.UPDATE:
-            self._stage_update_roles(assign_roles, remove_roles)
-            self._stage_update_users(add_user_ids, remove_user_ids)
-        if self.type == GroupSyncJobType.DELETE:
-            self._stage_update_roles(assign_roles, remove_roles)
-            self._stage_update_users(add_user_ids, remove_user_ids)
-            self.groupset.delete()
-        print(f'job completed')
+
 
     def add_diagnostic(
         self,
@@ -220,18 +189,54 @@ class GroupsetSyncJob(
 
 class GroupsetSyncJobDiagnostic(AbstractDiagnostic):
     job = models.ForeignKey(
-        GroupsetUserSyncJob,
+        GroupsetSyncJob,
         on_delete=models.SET_NULL,
         related_name='diagnostics'
     )
     groupset_id = models.IntegerField(null=True)
     user_id = models.IntegerField(null=True)
-    operation = models.CharField(max_length=10)
+    operation = models.CharField(max_length=10, null=True)
 
 
-class DeleteGroupsetJob(GroupsetSyncJob):
-    type = JobType.DELETED_GROUPSET.value
+class UpdateGroupsetSyncJob(GroupsetSyncJob):
+    type = JobType.UPDATE_GROUPSET.value
+
+    class Meta:
+        proxy = True
+
+    def act(self):
+        self.init_progress()
+        self._stage_update_groups()
+        self._stage_update_users()
+
+
+class CreateGroupsetSyncJob(GroupsetSyncJob):
+    type = JobType.CREATE_GROUPSET.value
+
+    def _stage_create_groupset(self):
+        pass
+
+    def act(self):
+        self.init_progress()
+        self._stage_create_groupset()
+        self._stage_update_groups()
+        self._stage_update_users()
+
     class Meta:
         proxy = True
 
 
+class DeleteGroupsetSyncJob(GroupsetSyncJob):
+    type = JobType.DELETE_GROUPSET.value
+
+    class Meta:
+        proxy = True
+
+    def _stage_delete_groupset(self):
+        pass
+
+    def act(self):
+        self.init_progress()
+        self._stage_update_groups()
+        self._stage_update_users()
+        self._stage_delete_groupset()
