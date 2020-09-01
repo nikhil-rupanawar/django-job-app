@@ -97,12 +97,18 @@ class AbstractJobNotifier(abc.ABCMeta):
 
 
 class DbSaveNotifier(AbstractJobNotifier):
-    """ Simply save the job to db """
+    """ Simply save the job state to db """
     def notify(self, job):
         job.save()
 
 
-def notify(f):
+# This could be done through model signals however,
+# If there are cases when job wants to
+# 1. Not to update to db but notify
+# 2. save() to db but do not notify
+# 3. Controll when to notify and when not to. (by overriding method and removing decorator)
+#  Hence keeping save and notify separate things.
+def notify_update(f):
     @functools.wraps(f)
     def wrapper(self, *args, **kwargs):
         try:
@@ -159,59 +165,59 @@ class AbstractJob(models.Model):
     def ui_status(self):
         return self._ui_status
 
-    @notify
+    @notify_update
     def acknowledge(self):
         self.update_status(status=JobStatus.REQUEST_ACK)
 
-    @notify
+    @notify_update
     def running(self):
         self.update_status(status=JobStatus.RUNNING)
 
-    @notify
+    @notify_update
     def fail(self, raise_error=True, reason=''):
         self.update_status(status=JobStatus.FAILED)
         if raise_error:
             raise JobFailedError(f'Job failed, reason={reason}')
 
-    @notify
+    @notify_update
     def success(self, notify):
         self.update_status(status=JobStatus.SUCCESS)
 
-    @notify
+    @notify_update
     def error(self):
         self.update_status(status=JobStatus.ERRORED)
 
-    @notify
+    @notify_update
     def success_with_warning(self):
         self.update_status(status=JobStatus.SUCCESS_WITH_WARNING)
 
-    @notify
+    @notify_update
     def start_stage(self, stage):
         self.stage = stage
 
-    @notify
+    @notify_update
     def end_stage(self, stage):
         pass
 
-    @notify
+    @notify_update
     def fail_stage(self, step, reason=''):
         raise JobStageFailedError(f'Stage {step} failed, reason={reason}')
 
-    @notify
+    @notify_update
     def cancel(self):
         assert self._can_cancel
         self.update_status(JobStatus.CANCELED)
 
-    @notify
+    @notify_update
     def abort(self):
         assert self._can_abort
         self.update_status(JobStatus.ABORTED)
 
-    @notify
+    @notify_update
     def prohibit_cancel(self):
         self._can_cancel = False
 
-    @notify
+    @notify_update
     def prohibit_abort(self):
         self._can_abort = False
 
@@ -286,6 +292,15 @@ class AbstractJob(models.Model):
             self.refresh_from_db()
         return self.status == JobStatus.ABORTED
 
+    def delay(self):
+        raise NotImplementedError()
+
+    def to_dict(self):
+        return type(self).objects.filter(pk=self.pk).values().first()
+    
+    def to_message(self):
+        return self.to_message()
+
 
 class JobProgressMixin(models.Model):
     class Meta:
@@ -305,7 +320,7 @@ class JobProgressMixin(models.Model):
     def add_units(self, units):
         self._total_units += units
 
-    @notify
+    @notify_update
     def report_progress(self, done_units:int=1, notify=True):
         self._done_units += done_units
 
@@ -359,4 +374,3 @@ class JobRunnerMixin:
             logger.exception(e)
         finally:
             self.finalize()
-

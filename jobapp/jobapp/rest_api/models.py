@@ -174,25 +174,29 @@ class GroupsetJob(
         )
 
     def act(self):
-        if '*' in self.data['add_user_ids']:
+        add_users_ids = self.data.get('add_user_ids', [])
+        remove_user_ids = self.data.get('remove_user_ids', [])
+        add_group_ids = self.data.get('add_group_ids', [])
+        remove_group_ids = self.data.get('remove_group_ids', [])
+        if '*' in add_group_ids:
             add_users = self.groupset.users
         else:
-            add_users = self.groupset.users.filter(id__in=self.data['add_user_ids'])
+            add_users = self.groupset.users.filter(id__in=add_users_ids)
 
-        if '*' in self.data['remove_user_ids']:
+        if '*' in remove_user_ids:
             remove_users = self.groupset.users
         else:
-            remove_users = self.groupset.users.filter(id__in=self.data['remove_user_ids'])
+            remove_users = self.groupset.users.filter(id__in=remove_user_ids)
 
-        if '*' in self.data['add_group_ids']:
+        if '*' in add_group_ids:
             add_groups = self.groupset.groups
         else:
-            add_groups = self.groupset.groups.filter(id__in=self.data['add_group_ids'])
+            add_groups = self.groupset.groups.filter(id__in=add_group_ids)
 
-        if '*' in self.data['remove_group_ids']:
+        if '*' in remove_group_ids:
             remove_groups = self.groupset.groups
         else:
-            remove_groups = self.groupset.groups.filter(id__in=self.data['add_group_ids'])
+            remove_groups = self.groupset.groups.filter(id__in=remove_group_ids)
 
         self.add_units(
             add_groups.count() +
@@ -203,17 +207,18 @@ class GroupsetJob(
         self.stage_groups_update(add_groups, remove_groups)
         self.stage_users_update(add_users, remove_users)
 
+    def delay(self):
+        job_message = self.to_message()
+        # TODO: publish to SNS queue
+        logger.debug(f'Sent job to queue {job_message}.')
+
 
 class GroupsetJobDiagnostic(AbstractDiagnostic):
 
     class Stage(models.TextChoice):
-        UPDATE_UPDATE = 'UPDATE_GROUP'
-        USERS_UPADTE = 'UPADTE_GROUP'
+        GROUP_UPDATE = 'GROUPS_UPADTE'
+        USERS_UPADTE = 'USERS_UPDATE'
         DELETE_GROUPSET = 'DELETE_GROUPSET'
-
-    class Step(models.TextChoices):
-        ADD_USER = 'ADD_USER'
-        REMOVE_USER = 'REMOVE_USER'
 
     job = models.ForeignKey(
         GroupsetJob,
@@ -233,7 +238,7 @@ class ManagerCreateGroupsetJob(models.Manager):
 
 class CreateGroupsetJob(GroupsetJob):
     type = GroupsetJob.GroupsetJobType.CREATE
-
+    objects = ManagerCreateGroupsetJob()
     class Meta:
         proxy = True
 
@@ -252,7 +257,7 @@ class UpdateGroupsetJob(GroupsetJob):
         proxy = True
 
 
-class DeleteGroupsetJobManager(models.Manager):
+class ManagerDeleteGroupsetJob(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(
             GroupsetJob.GroupsetJobType.CREATE   
@@ -261,7 +266,7 @@ class DeleteGroupsetJobManager(models.Manager):
 
 class DeleteGroupsetJob(GroupsetJob):
     type = GroupsetJob.GroupsetJobType.DELETE
-
+    objects = ManagerDeleteGroupsetJob()
     class Meta:
         proxy = True
 
@@ -282,3 +287,27 @@ class DeleteGroupsetJob(GroupsetJob):
         super().act()
         self.stage_delete_groupset()
 
+
+if __name__ == "__main__":
+    # configure django
+    from django.conf import settings
+    settings.configure()
+    # Create group
+    groupset = Groupset(name='test')
+    groupset.save()
+
+    # Create a job
+    job = CreateGroupsetJob(
+        groupset=groupset,
+        data=dict(
+            add_user_is=['*'],
+            add_group_ids=['*']
+        )
+    )
+    job.save()
+    # Send job to your prefered async queue 
+    job.delay()
+
+    job = CreateGroupsetJob.objects.get(id=job.id)
+    # OR just run it
+    job.run() # blocks
