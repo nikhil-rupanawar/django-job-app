@@ -207,6 +207,16 @@ class GroupsetJob(
         self.stage_groups_update(add_groups, remove_groups)
         self.stage_users_update(add_users, remove_users)
 
+    def to_message(self):
+        message = super().to_message()
+        return {
+            'job_id': message['id']
+        }
+
+    @classmethod
+    def from_message(cls, message):
+        return cls.objects.get(id=message['job_id'])
+
     def delay(self):
         job_message = self.to_message()
         # TODO: publish to SNS queue
@@ -292,6 +302,8 @@ if __name__ == "__main__":
     # configure django
     from django.conf import settings
     settings.configure()
+
+    ###### Demo create groupset job #####
     # Create group
     groupset = Groupset(name='test')
     groupset.save()
@@ -308,6 +320,11 @@ if __name__ == "__main__":
     # Send job to your prefered async queue 
     job.delay()
 
-    job = CreateGroupsetJob.objects.get(id=job.id)
-    # OR just run it
-    job.run() # blocks
+    # On daemon side >>>
+    # You will get it from queue but for demo just convert object to message
+    message = job.to_message()
+
+    job = GroupsetJob.from_message(message)
+    # just run it! i(t blocks).
+    job.run()
+    #### End demo create groupset job #####
