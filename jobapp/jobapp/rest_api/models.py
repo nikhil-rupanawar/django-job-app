@@ -152,24 +152,6 @@ class GroupsetJob(AbstractProgressJob, StepDiagnosticMixin):
         self.stage_users_update(add_users, remove_users)
 
 
-class GroupsetJobDiagnostic(AbstractDiagnostic):
-
-    class Step(models.TextChoices):
-        ADD_USER = 'ADD_USER'
-        REMOVE_USER = 'REMOVE_USER'
-
-    class Stage(models.TextChoice):
-        GROUP_UPDATE = 'GROUPS_UPADTE'
-        USERS_UPADTE = 'USERS_UPDATE'
-        DELETE_GROUPSET = 'DELETE_GROUPSET'
-
-    job = models.ForeignKey(
-        GroupsetJob,
-        on_delete=models.CASCADE,
-        related_name='diagnostics'
-    )
-
-
 class ManagerCreateGroupsetJob(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(
@@ -208,19 +190,42 @@ class ManagerDeleteGroupsetJob(models.Manager):
 class DeleteGroupsetJob(GroupsetJob):
     type = GroupsetJob.GroupsetJobType.DELETE
     objects = ManagerDeleteGroupsetJob()
+
     class Meta:
         proxy = True
 
     def stage_delete_groupset(self):
-        with self.diagnostics.StageContext(GroupsetJobDiagnostic.Stage.DELETE_GROUPSET)
-            with transaction.atomic():
-                self.groupset.delete()
+        with self.AnnounceStage(GroupsetJobDiagnostic.Stage.DELETE_GROUPSET):
+            try:
+                with transaction.atomic():
+                    self.groupset.delete()
+            except Exception as e:
+                logger.exception(e)
+                self.stage_fail(GroupsetJobDiagnostic.Stage.DELETE_GROUPSET)
 
     def act(self):
         self.add_total_units(1)
         super().act()
         self.stage_delete_groupset()
         self.add_done_units(1)
+
+
+class GroupsetJobDiagnostic(AbstractDiagnostic):
+    
+    class Step(models.TextChoices):
+        ADD_USER = 'ADD_USER'
+        REMOVE_USER = 'STEP_REMOVE_USER'
+
+    class Stage(models.TextChoice):
+        GROUP_UPDATE = 'GROUPS_UPADTE'
+        USERS_UPADTE = 'USERS_UPDATE'
+        DELETE_GROUPSET = 'DELETE_GROUPSET'
+
+    job = models.ForeignKey(
+        GroupsetJob,
+        on_delete=models.CASCADE,
+        related_name='diagnostics'
+    )
 
 
 # if __name__ == "__main__":
