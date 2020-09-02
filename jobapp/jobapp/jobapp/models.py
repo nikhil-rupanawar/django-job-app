@@ -57,10 +57,9 @@ FINAL_STATUSES = (
     JobStatus.ERRORED,
     JobStatus.SUCCESS,
     JobStatus.SUCCESS_WITH_WARNING,
-    JobStatus.ABORTED,
     JobStatus.CANCELED
 )
-UNDETERMINISTIC_STATUSES = (JobStatus.RUNNING, JobStatus.PAUSED)
+UNDETERMINISTIC_STATUSES = (JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.CANCEL_REQUESTED, JobStatus.REQUEST_ACK)
 SUCCESS_STATUSES = (JobStatus.SUCCESS, JobStatus.SUCCESS_WITH_WARNING)
 FAILED_STATUSES = (JobStatus.FAILED, JobStatus.ERRORED)
 
@@ -341,8 +340,6 @@ class AbstractProgressJob(AbstractJob, AbstractJobProgressMixin):
 
 
 class AbstractDiagnostic(models.Model):
-    objects = _DiagnosticQueryset.as_manager()
-
     class Meta:
         abstract = True
 
@@ -353,7 +350,7 @@ class AbstractDiagnostic(models.Model):
     step = models.CharField(null=True, blank=True, max_length=50)
 
 
-class StepDiagnosticMixin:
+class StepDiagnosticJobMixin:
     
     STEP_DIAGNOSTIC_RELATED_NAME = 'diagnostics'
 

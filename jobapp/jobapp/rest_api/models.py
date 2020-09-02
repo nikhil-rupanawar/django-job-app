@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db import models
 from jobapp.jobapp.models import (
     AbstractProgressJob,
-    JobStepDiagnosticMixin,
+    StepDiagnosticJobMixin,
     AbstractDiagnostic,
     Severity
 )
@@ -43,7 +43,7 @@ class Groupset(models.Model):
     groups = models.ManyToManyField(Group)
 
 
-class GroupsetJob(AbstractProgressJob, StepDiagnosticMixin):
+class GroupsetJob(AbstractProgressJob, StepDiagnosticJobMixin):
 
     STEP_DIAGNOSTIC_RELATED_NAME = 'diagnostics'
 
@@ -216,7 +216,7 @@ class GroupsetJobDiagnostic(AbstractDiagnostic):
         ADD_USER = 'ADD_USER'
         REMOVE_USER = 'STEP_REMOVE_USER'
 
-    class Stage(models.TextChoice):
+    class Stage(models.TextChoices):
         GROUP_UPDATE = 'GROUPS_UPADTE'
         USERS_UPADTE = 'USERS_UPDATE'
         DELETE_GROUPSET = 'DELETE_GROUPSET'
