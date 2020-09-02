@@ -6,9 +6,8 @@ import django.contrib.postgres.fields as postgres_fields
 from django.db import transaction
 from django.db import models
 from jobapp.jobapp.models import (
-    AbstractJob,
-    JobProgressMixin,
-    JobRunnerMixin,
+    AbstractProgressJob,
+    JobStepDiagnosticMixin,
     AbstractDiagnostic,
     Severity
 )
@@ -44,62 +43,56 @@ class Groupset(models.Model):
     groups = models.ManyToManyField(Group)
 
 
-class GroupsetJob(
-    AbstractJob,
-    JobProgressMixin,
-    JobRunnerMixin
-):
+class GroupsetJob(AbstractProgressJob, StepDiagnosticMixin):
+
+    STEP_DIAGNOSTIC_RELATED_NAME = 'diagnostics'
+
     class GroupsetJobType(models.IntegerChoices):
         CREATE = 1
         UPDATE = 2
         DELETE = 3
 
-    groupset = models.ForeignKey(Groupset, on_delete=models.SET_NULL)
+    groupset = models.ForeignKey(Groupset, on_delete=models.SET_NULL, null=True)
 
-    def add_user(self, user):
-        result = True
-        try:
-            with transaction.atomic():
-                self.groupset.users.add(user)
-                self.groupset.save()
-                self.add_diagnostic(
-                    user=user,
-                    message='User added successfully.',
-                    serverity=Severity.INFO
-                )
-        except Exception as e:
-            logger.exception(e)
-            self.add_diagnostic(
-                user=user,
-                message='Failed update groups.',
-                serverity=Severity.CRITICAL # TODO depends on type of error
-            )
-            result = False
-            self.fail(raise_error=False)
-        finally:
-            self.report_progress(units=1)
-        return result
-
-    def remove_user(self, user):
+    def step_add_user(self, user):
         try:
             with transaction.atomic():
                 self.groupset.users.remove(user)
                 self.groupset.save()
-                self.add_diagnostic(
-                    user=user,
-                    message='User removed.',
-                    serverity=Severity.INFO
-                )
         except Exception as e:
-            logger.exception(e)
-            self.add_user_diagnostic(
-                user=user,
-                message='Failed to remove user.',
-                serverity=Severity.CRITICAL # TODO depends on type of error
+            self.step_fail(            
+                GroupsetJobDiagnostic.Step.ADD_USER,
+                groupset_name=self.groupset.name,
+                username=user.username,
+                raise_error=False
             )
-        finally:
-            self.report_progress(units=1)
-        return result
+        else:
+            self.step_success(            
+                GroupsetJobDiagnostic.Step.ADD_USER,
+                groupset_name=self.groupset.name,
+                username=user.username,
+            )
+        self.add_done_units(1)
+
+    def step_remove_user(self, user):
+        try:
+            with transaction.atomic():
+                self.groupset.users.remove(user)
+                self.groupset.save()
+        except Exception as e:
+            self.step_fail(            
+                GroupsetJobDiagnostic.Step.REMOVE_USER,
+                groupset_name=self.groupset.name,
+                username=user.username,
+                raise_error=False
+            )
+        else:
+            self.step_success(            
+                GroupsetJobDiagnostic.Step.REMOVE_USER,
+                groupset_name=self.groupset.name,
+                username=user.username,
+            )
+        self.add_done_units(1)
 
     @property
     def data(self):
@@ -111,94 +104,45 @@ class GroupsetJob(
             'remove_user_ids': [4, 6],
         }
 
-    def start_stage(self, stage, message=None):
-        super().start_stage()
-        self.add_diagnostic(message=message)
-
-    def end_stage(self, stage, message=None):
-        super().start_stage()
-        self.add_diagnostic(message=message)
-
-    def fail_stage(self, stage, reason=None):
-        self.dignostics.create(message=reason)
-        super().fail_stage(reason=reason)
-
     def stage_users_update(self, add_users, remove_users):
-        self.start_stage(GroupsetJobDiagnostic.Stage.USERS_UPDATE)
-        try:
-            for user in add_users:
-                self.add_users(user)
-            for user in remove_users:
-                self.remove_users(user)
-        except Exception as e:
-            logger.exception(e)
-        finally:
-            self.end_stage(GroupsetJobDiagnostic.Stage.USERS_UPDATE)
-        if self.diagnostics.filter(severity=Severity.CRITICAL).exists():
-            self.fail_stage(GroupsetJobDiagnostic.Stage.USERS_UPADTE)
-            self.fail(reason=f'Stage failed {GroupsetJobDiagnostic.Stage.USERS_UPDATE}')
+        with self.AnnounceStage(GroupsetJobDiagnostic.Stage.USERS_UPDATE):
+            try:
+                for user in add_users:
+                    self.step_add_user(user)
+                for user in remove_users:
+                    self.step_remove_user(user)
+            except Exception as e:
+                logger.exception(e)
+                self.stage_fail(GroupsetJobDiagnostic.Stage.USERS_UPDATE)
+            else:
+                self.stage_success(GroupsetJobDiagnostic.Stage.USERS_UPDATE)
 
     def stage_groups_update(self, add_groups, remove_groups):
-        self.start_stage(GroupsetJobDiagnostic.Stage.GROUP_UPDATE)
-        try:
-            with transaction.atomic():
-                self.groupset.groups.add(add_groups)
-                self.groupset.groups.remove(remove_groups)
-        except Exception as e:
-            logger.exception(e)
-            self.fail_stage(GroupsetJobDiagnostic.Stage.GROUP_UPDATE)
-        finally:
-            self.report_progress(len(add_groups) + len(remove_groups))
-            self.end_stage(GroupsetJobDiagnostic.Stage.GROUP_UPDATE)
-        if self.diagnostics.filter(severity=Severity.CRITICAL).exists():
-            self.fail_stage(GroupsetJobDiagnostic.Stage.GROUP_UPADTE)
-            self.fail(reason=f'Stage failed {GroupsetJobDiagnostic.Stage.GROUP_UPDATE}')
-
-    def add_diagnostic(
-        self,
-        user=None,
-        step=None,
-        stage=None,
-        message=None,
-        details=None,
-        severity=Severity.INFO
-    ):
-        self.diagnostics.create(
-            user_id=user.id,
-            username=user.username,
-            severity=severity,
-            step=step,
-            stage=stage,
-            message=message,
-            details=details,
-        )
+        with self.AnnounceStage(GroupsetJobDiagnostic.Stage.GROUP_UPADTE):
+            try:
+                with transaction.atomic():
+                    self.groupset.groups.add(add_groups)
+                    self.groupset.groups.remove(remove_groups)
+            except Exception as e:
+                logger.exception(e)
+                self.stage_fail(GroupsetJobDiagnostic.Stage.GROUP_UPADTE)
+            else:
+                self.stage_success(GroupsetJobDiagnostic.Stage.GROUP_UPADTE)
 
     def act(self):
-        add_users_ids = self.data.get('add_user_ids', [])
-        remove_user_ids = self.data.get('remove_user_ids', [])
-        add_group_ids = self.data.get('add_group_ids', [])
-        remove_group_ids = self.data.get('remove_group_ids', [])
-        if '*' in add_group_ids:
-            add_users = self.groupset.users
-        else:
-            add_users = self.groupset.users.filter(id__in=add_users_ids)
-
-        if '*' in remove_user_ids:
-            remove_users = self.groupset.users
-        else:
-            remove_users = self.groupset.users.filter(id__in=remove_user_ids)
-
-        if '*' in add_group_ids:
-            add_groups = self.groupset.groups
-        else:
-            add_groups = self.groupset.groups.filter(id__in=add_group_ids)
-
-        if '*' in remove_group_ids:
-            remove_groups = self.groupset.groups
-        else:
-            remove_groups = self.groupset.groups.filter(id__in=remove_group_ids)
-
-        self.add_units(
+        add_users = self.groupset.users if '*' in add_group_ids else self.groupset.users.filter(
+            id__in=self.data.get('add_user_ids', [])
+        )
+        remove_users = self.groupset.users if '*' in  remove_user_ids else self.groupset.users.filter(
+            id__in=self.data.get('remove_user_ids', [])
+        )
+        add_groups = self.groupset.groups if '*' in add_group_ids else self.groupset.groups.filter(
+            id__in=self.data.get('add_group_ids', [])
+        )
+        remove_groups = self.groupset.groups if '*' in remove_group_ids else self.groupset.groups.filter(
+            id__in=self.data.get('remove_group_ids', [])
+        )
+        self.add_total_units(
             add_groups.count() +
             remove_groups.count() +
             add_users.count() +
@@ -207,23 +151,12 @@ class GroupsetJob(
         self.stage_groups_update(add_groups, remove_groups)
         self.stage_users_update(add_users, remove_users)
 
-    def to_message(self):
-        message = super().to_message()
-        return {
-            'job_id': message['id']
-        }
-
-    @classmethod
-    def from_message(cls, message):
-        return cls.objects.get(id=message['job_id'])
-
-    def delay(self):
-        job_message = self.to_message()
-        # TODO: publish to SNS queue
-        logger.debug(f'Sent job to queue {job_message}.')
-
 
 class GroupsetJobDiagnostic(AbstractDiagnostic):
+
+    class Step(models.TextChoices):
+        ADD_USER = 'ADD_USER'
+        REMOVE_USER = 'REMOVE_USER'
 
     class Stage(models.TextChoice):
         GROUP_UPDATE = 'GROUPS_UPADTE'
@@ -232,11 +165,9 @@ class GroupsetJobDiagnostic(AbstractDiagnostic):
 
     job = models.ForeignKey(
         GroupsetJob,
-        on_delete=models.SET_NULL,
+        on_delete=models.CASCADE,
         related_name='diagnostics'
     )
-    user_id = models.IntegerField(null=True)
-    username = models.CharField(max_length=255, null=True)
 
 
 class ManagerCreateGroupsetJob(models.Manager):
@@ -281,50 +212,41 @@ class DeleteGroupsetJob(GroupsetJob):
         proxy = True
 
     def stage_delete_groupset(self):
-        self.start_stage(GroupsetJobDiagnostic.Stage.DELETE_GROUPSET)
-        try:
+        with self.diagnostics.StageContext(GroupsetJobDiagnostic.Stage.DELETE_GROUPSET)
             with transaction.atomic():
                 self.groupset.delete()
-        except Exception as e:
-            logger.exception(e)
-            self.fail_stage(GroupsetJobDiagnostic.Stage.DELETE_GROUPSET)
-        finally:
-            self.end_stage(GroupsetJobDiagnostic.Stage.DELETE_GROUPSET)
-        self.report_progress(done_units=1)
 
     def act(self):
-        self.add_units(1)
+        self.add_total_units(1)
         super().act()
         self.stage_delete_groupset()
+        self.add_done_units(1)
 
 
-if __name__ == "__main__":
-    # configure django
-    from django.conf import settings
-    settings.configure()
+# if __name__ == "__main__":
 
-    ###### Demo create groupset job #####
-    # Create group
-    groupset = Groupset(name='test')
-    groupset.save()
 
-    # Create a job
-    job = CreateGroupsetJob(
-        groupset=groupset,
-        data=dict(
-            add_user_is=['*'],
-            add_group_ids=['*']
-        )
-    )
-    job.save()
-    # Send job to your prefered async queue 
-    job.delay()
+#     ###### Demo create groupset job #####
+#     # Create group
+#     # TODO: transaction handling
+#     groupset = Groupset(name='test')
+#     groupset.save()
+#     # Create a job
+#     job = CreateGroupsetJob(
+#         groupset=groupset,
+#         data=dict(
+#             add_user_ids=[1, 2, 3],
+#             add_group_ids=['*']
+#         )
+#     )
+#     job.save()
+#     # Send job to your prefered async queue 
+#     job.delay()
 
-    # On daemon side >>>
-    # You will get it from queue but for demo just convert object to message
-    message = job.to_message()
-
-    job = GroupsetJob.from_message(message)
-    # just run it! i(t blocks).
-    job.run()
+#     # On daemon side >>>
+#     # You will get it from queue but for demo just convert object to message
+#     message = job.to_message()
+#     job = GroupsetJob.from_message(message)
+#     # just run it! i(t blocks).
+#     job.run()
     #### End demo create groupset job #####

@@ -4,18 +4,17 @@ import time
 import enum
 import functools
 import django.contrib.postgres.fields as postgres_fields
+from django.db.models.query import QuerySet
 from django.db import transaction
-
 from django.utils import timezone
 from datetime import datetime, timedelta
 from django.db import models
 from typing import Type
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.models import Group
-
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
-
 
 def now():
     return timezone.now()
@@ -29,8 +28,8 @@ class JobStatus(models.IntegerChoices):
     ERRORED = 6
     SUCCESS = 7
     SUCCESS_WITH_WARNING = 8
-    CANCELED = 9
-    ABORTED = 10
+    CANCEL_REQUESTED = 9
+    CANCELED = 10
     PAUSED = 11
 
 
@@ -42,8 +41,8 @@ class UiStatus(models.TextChoices):
     ERRORED = 'Errored'
     SUCCESS = 'Success'
     SUCCESS_WITH_WARNING = 'Success with warning(s)'
+    CANCEL_REQUESTED = 'Cancel requested'
     CANCELED = 'Canceled'
-    ABORTED = 'Aborted'
 
 
 class Severity(models.IntegerChoices):
@@ -82,10 +81,6 @@ class JobStateError(Exception):
     pass
 
 
-class JobAbortedError(JobStateError):
-    pass
-
-
 class JobCanceledError(JobStateError):
     pass
 
@@ -112,30 +107,15 @@ def notify_update(f):
     @functools.wraps(f)
     def wrapper(self, *args, **kwargs):
         try:
-           result = f(self, *args, **kwargs)
-           return result
+           return f(self, *args, **kwargs)
         finally:
            self.notify()
     return wrapper
 
 
-class AbstractDiagnostic(models.Model):
-    
-    class Meta:
-        abstract = True
-
-    severity = models.IntegerField(default=Severity.INFO)
-    created_by = models.CharField(max_length=255)
-    created_at =  models.DateTimeField(auto_now_add=True)
-    updated_at =  models.DateTimeField(auto_now_add=True)
-    details = postgres_fields.JSONField(null=True)
-    stage = models.CharField(null=True, blank=True, max_length=50)
-    step = models.CharField(null=True, blank=True, max_length=50)
-
-
 class AbstractJob(models.Model):
 
-    DEFAULT_TTL_THRESHOLD = (3 * 24 * 60 * 60)
+    DEFAULT_TTL_THRESHOLD = (3 * 24 * 60 * 60) # 3 days
 
     class Meta:
         abstract = True
@@ -143,14 +123,12 @@ class AbstractJob(models.Model):
     _status = models.IntegerField(null=True)
     _ui_status = models.CharField(choices=UiStatus.choices, max_length=255)
     _data = postgres_fields.JSONField(null=True)
-    _can_cancel = models.BooleanField(default=True)
-    _can_abort = models.BooleanField(default=False)
     type = models.IntegerField(null=True)
     created_by = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     created_at =  models.DateTimeField(auto_now_add=True)
     updated_at =  models.DateTimeField(auto_now_add=True)
-    ttl = models.IntegerField(default=DEFAULT_TTL_THRESHOLD) # 3 days
+    ttl = models.IntegerField(default=DEFAULT_TTL_THRESHOLD)
 
     def __init__(self, *args, notifiers=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -188,38 +166,18 @@ class AbstractJob(models.Model):
         self.update_status(status=JobStatus.ERRORED)
 
     @notify_update
+    def cancel(self, raise_error=True, reason=''):
+        self.update_status(status=JobStatus.FAILED)
+        if raise_error:
+            raise JobCanceledError(f'Job canceled')
+
+    @notify_update
     def success_with_warning(self):
         self.update_status(status=JobStatus.SUCCESS_WITH_WARNING)
 
     @notify_update
-    def start_stage(self, stage):
-        self.stage = stage
-
-    @notify_update
-    def end_stage(self, stage):
-        pass
-
-    @notify_update
-    def fail_stage(self, step, reason=''):
-        raise JobStageFailedError(f'Stage {step} failed, reason={reason}')
-
-    @notify_update
-    def cancel(self):
-        assert self._can_cancel
-        self.update_status(JobStatus.CANCELED)
-
-    @notify_update
-    def abort(self):
-        assert self._can_abort
-        self.update_status(JobStatus.ABORTED)
-
-    @notify_update
-    def prohibit_cancel(self):
-        self._can_cancel = False
-
-    @notify_update
-    def prohibit_abort(self):
-        self._can_abort = False
+    def request_cancel(self):
+        self.update_status(JobStatus.REQUEST_CANCEL)
 
     def update_status(self, status: JobStatus, ui_status: UiStatus=None):
         assert status or ui_status
@@ -249,20 +207,11 @@ class AbstractJob(models.Model):
         for notifier in self.notifiers:
             notifier.notify(self)
 
-    def on_success(self):
-        pass
-
-    def on_failure(self):
-        pass
-
-    def finalize(self):
-        pass
-
     def act(self):
-        pass
+        raise NotImplementedError()
 
     def act_resume(self):
-        pass
+        raise NotImplementedError()
 
     @property
     def has_expired(self):
@@ -281,16 +230,13 @@ class AbstractJob(models.Model):
         return self.status == JobStatus.FAILED
 
     @property
-    def is_canceled(self, refresh_from_db=True):
-        if refresh_from_db:
-            self.refresh_from_db()
-        return self.status == JobStatus.CANCELED
+    def is_cancel_requested(self, refresh=True):
+        if refresh:
+            self.refresh()
+        return self.status == JobStatus.CANCEL_REQUESTED
 
-    @property
-    def is_aborted(self, refresh_from_db=True):
-        if refresh_from_db:
-            self.refresh_from_db()
-        return self.status == JobStatus.ABORTED
+    def refresh(self):
+        self.refresh_from_db()
 
     def delay(self):
         raise NotImplementedError()
@@ -301,28 +247,75 @@ class AbstractJob(models.Model):
     def to_message(self):
         return self.to_message()
 
+    def on_success(self):
+        pass
 
-class JobProgressMixin(models.Model):
+    def on_failure(self):
+        pass
+
+    def finalize(self):
+        pass
+
+    def run(self):
+        self.acknowledge()
+        try:
+            if self.is_cancel_requested():
+                self.cancel()
+            else:
+                self.running()
+                self.act()
+        except (JobFailedError, JobStageFailedError, JobStepFailedError) as e:
+            if self.status != JobStatus.FAILED:
+                self.fail(raise_error=False, reason=e.args[0])
+        except JobCanceledError as e:
+            if self.status != JobStatus.FAILED:
+                self.cancel(raise_error=False, reason=e.args[0])
+        except JobStateError as e:
+            logger.exception(e)
+        except Exception as e:
+            logger.exception(e)
+            self.error()
+        else:
+            if self.status not in FINAL_STATUSES:
+                self.success()
+        finally:
+            try:
+                self._process_post_job_hooks()
+            except Exception as e:
+                logger.exception(e)
+                self.success_with_warning()
+
+    def _process_post_job_hooks(self):
+        try:
+            if self.status in SUCCESS_STATUSES:
+                self.on_success()
+            if self.status in FAILED_STATUSES:
+                self.on_failure()
+        finally:
+            self.finalize()
+
+
+class AbstractJobProgressMixin(models.Model):
     class Meta:
         abstract = True
-    _total_units = models.IntegerField(db_column='progress_total_units', default=0)
-    _done_units = models.IntegerField(db_column='progress_done_units', default=0)
+    _progress_total_units = models.IntegerField(default=0)
+    _progress_done_units = models.IntegerField(default=0)
     _progress_percent = models.IntegerField(null=True)
-    progress_unit = models.CharField(max_length=50, blank=True)
-    progress_unit_plural = models.CharField(max_length=50, blank=True)
 
+    @property
     def total_units(self):
-        return self._total_units
+        return self._progress_total_units
 
+    @property
     def done_units(self):
-        return self._done_units
+        return self._progress_done_units
 
-    def add_units(self, units):
-        self._total_units += units
+    def add_total_units(self, units):
+        self._progress_total_units += units
 
     @notify_update
-    def report_progress(self, done_units:int=1, notify=True):
-        self._done_units += done_units
+    def add_done_units(self, units):
+        self._progress_done_units += units
 
     @property
     def remaining_units(self):
@@ -334,7 +327,7 @@ class JobProgressMixin(models.Model):
             return self._progress_percent
         if self.total_units == 0:
             return 0
-        return ((self.done_units * 100) / self.total_units)
+        return (self.done_units * 100) / self.total_units
  
     @progress_percent.setter
     def progress_percent(self, value: int):
@@ -342,35 +335,118 @@ class JobProgressMixin(models.Model):
         self._progress_percent = value
 
 
-class JobRunnerMixin:
-    def run(self):
-        self.acknowledge()
-        try:
-            self.prohibit_cancel()
-            self.running()
-            self.act()
-        except (JobFailedError, JobStageFailedError, JobStepFailedError) as e:
-            logger.exception(e)
-            if self.status != JobStatus.FAILED:
-                self.fail(raise_error=False, reason=e.args[0])
-        except JobStateError as e:
-            logger.exception(e)
-        except Exception as e:
-            logger.exception(e)
-            self.error()
-        else:
-            if self.status not in FINAL_STATUSES:
-                self.success()
-        finally:
-            self.process_post_job_hooks()
+class AbstractProgressJob(AbstractJob, AbstractJobProgressMixin):
+    class Meta:
+        abstract = True
 
-    def process_post_job_hooks(self):
+
+class AbstractDiagnostic(models.Model):
+    objects = _DiagnosticQueryset.as_manager()
+
+    class Meta:
+        abstract = True
+
+    severity = models.IntegerField(default=Severity.INFO)
+    created_at =  models.DateTimeField(auto_now_add=True)
+    details = postgres_fields.JSONField(null=True)
+    stage = models.CharField(null=True, blank=True, max_length=50)
+    step = models.CharField(null=True, blank=True, max_length=50)
+
+
+class StepDiagnosticMixin:
+    
+    STEP_DIAGNOSTIC_RELATED_NAME = 'diagnostics'
+
+    @property
+    def _rel_diagnostics(self):
+        return getattr(self, self.DIAGNOSTIC_RELATED_NAME)
+
+    def step_success(self, step, **step_data):
+        return self._rel_diagnostics.create(
+            step=step,
+            details=step_data,
+        )
+
+    def step_fail(
+        self,
+        step,
+        severity=Severity.CRITICAL,
+        raise_error=True,
+        **step_data
+    ):
+        obj = self._rel_diagnostics.create(
+            step=step,
+            severity=severity,
+            details=step_data,
+        )
+        if raise_error:
+            raise JobStepFailedError(step)
+        return obj
+
+    @contextmanager
+    def announce_step(self, step, **stage_data):
+        self.step_start(stage)
         try:
-            if self.status in SUCCESS_STATUSES:
-                self.on_success()
-            if self.status in FAILED_STATUSES:
-                self.on_failure()
-        except Exception as e:
-            logger.exception(e)
+            yield
         finally:
-            self.finalize()
+            self.step_end(stage)
+
+    AnnounceStep = announce_step
+
+    def step_start(self, stage, message='Step stared.'):
+        return self._rel_diagnostics.create(
+            step=step,
+            details=dict(message=message),
+        )
+
+    def step_end(self, stage, message='Step completed.'):
+        return self._rel_diagnostics.create(
+            step=step,
+            details=dict(message=message),
+        )
+
+    def stage_success(self, stage, **stage_data):
+        return self._rel_diagnostics.create(
+            stage=stage,
+            details=stage_data
+        )
+
+    def stage_fail(
+        self,
+        stage,
+        severity=Severity.CRITICAL,
+        raise_error=True,
+        **stage_data
+    ):
+        obj = self._rel_diagnostics.create(
+            *args,
+            stage=stage,
+            severity=severity,
+            details=stage_data,
+        )
+
+    def stage_start(self, stage, message='Stage stared.'):
+        return self._rel_diagnostics.create(
+            stage=stage,
+            details=dict(message=message),
+        )
+
+    def stage_end(self, stage, message='Stage completed.'):
+        return self._rel_diagnostics.create(
+            stage=stage,
+            details=dict(message=message),
+        )
+
+    @contextmanager
+    def announce_stage(self, stage, **stage_data):
+        self.stage_start(stage)
+        try:
+            yield
+        finally:
+            self.stage_end(stage)
+
+    def determine_job_status_from_diagnostics(self):
+        if self._rel_diagnostics.objects.filter(severity=Severity.CRITICAL).exists():
+            return JobStatus.FAILED
+        return JobStatus.SUCCESS
+    AnnounceStage = announce_step
