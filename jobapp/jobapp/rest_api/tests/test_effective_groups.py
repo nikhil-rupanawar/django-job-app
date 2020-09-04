@@ -5,7 +5,7 @@ from jobapp.rest_api import models
 
 class TestEffectiveGroups(TestCase):
 
-    def test_relations_grouset_user_group(self):
+    def test_effective_groups(self):
         created_direct_groups = []
         created_groupset_groups = []
         created_common_groups = []
