@@ -2,7 +2,6 @@ import logging
 import abc
 import time
 import enum
-import django.contrib.postgres.fields as postgres_fields
 from django.db import transaction
 from django.db import models
 from jobapp.jobapp.models import (
@@ -22,25 +21,32 @@ logger = logging.getLogger(__name__)
 class User(AbstractUser):
 
     @property
-    def direct_groups(self):
-        return [g.name for g in self.groups.all()]
+    def direct_group_names(self):
+        return { g.name for g in self.groups.all() }
 
     @property
     def groupset_groups(self):
-        return [
-            g.name for gs in self.groupset_set.all()
-            for g in gs.groups.all()
-        ]
+        for gs in self.groupsets.prefetch_related('groups'):
+            for g in gs.groups.all():
+                yield g
+
+    @property
+    def groupsets_groups_names(self):
+        return { g.name for g in self.groupset_groups }
 
     @property
     def effective_groups(self):
-        return set(self.direct_groups + self.groupset_groups)
+        return list(self.groups.all()) +  list(self.groupset_groups)
+
+    @property
+    def effective_group_names(self):
+        return { g.name for g in self.effective_groups }
 
 
 class Groupset(models.Model):
     name = models.CharField(max_length=255)
-    users = models.ManyToManyField(User)
-    groups = models.ManyToManyField(Group)
+    users = models.ManyToManyField(User, related_name='groupsets')
+    groups = models.ManyToManyField(Group, related_name='groupsets')
 
 
 class GroupsetJob(AbstractProgressJob, StepDiagnosticJobMixin):

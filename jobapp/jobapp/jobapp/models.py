@@ -121,7 +121,7 @@ class AbstractJob(models.Model):
 
     _status = models.IntegerField(null=True)
     _ui_status = models.CharField(choices=UiStatus.choices, max_length=255)
-    _data = postgres_fields.JSONField(null=True)
+    _data = models.JSONField(null=True)
     type = models.IntegerField(null=True)
     created_by = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
@@ -345,7 +345,7 @@ class AbstractDiagnostic(models.Model):
 
     severity = models.IntegerField(default=Severity.INFO)
     created_at =  models.DateTimeField(auto_now_add=True)
-    details = postgres_fields.JSONField(null=True)
+    details = models.JSONField(null=True)
     stage = models.CharField(null=True, blank=True, max_length=50)
     step = models.CharField(null=True, blank=True, max_length=50)
 
