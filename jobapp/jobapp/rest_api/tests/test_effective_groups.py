@@ -3,7 +3,7 @@ from jobapp.rest_api.tests import factory
 from jobapp.rest_api import models
 
 
-class CreateGroupsetJob(TestCase):
+class TestEffectiveGroups(TestCase):
 
     def test_relations_grouset_user_group(self):
         created_direct_groups = []
