@@ -30,7 +30,7 @@ class TestEffectiveGroups(TestCase):
         expected_direct_group_names = [g.name for g in created_direct_groups]
         expected_groupset_group_names = [g.name for g in created_groupset_groups]
         expected_common_group_names = [g.name for g in created_common_groups]
-        effective_group_names = set(
+        expected_effective_group_names = set(
             expected_direct_group_names + expected_groupset_group_names + expected_common_group_names
         )
 
@@ -44,7 +44,7 @@ class TestEffectiveGroups(TestCase):
             user.direct_group_names
         )
         self.assertEquals(
-            set(effective_group_names),
+            set(expected_effective_group_names),
             user.effective_group_names
         )
 
