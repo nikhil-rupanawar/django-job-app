@@ -87,5 +87,18 @@ class GroupsetFactory(factory.django.DjangoModelFactory):
 
 
 class CreateGroupsetJobFactoty(factory.django.DjangoModelFactory):
+    class Meta:
+        model = models.CreateGroupsetJob
     groupset = SubFactory(GroupsetFactory)
 
+
+class UpdateGroupsetJobFactoty(factory.django.DjangoModelFactory):
+    class Meta:
+        model = models.UpdateGroupsetJob
+    groupset = SubFactory(GroupsetFactory)
+
+
+class DeleteGroupsetJobFactoty(factory.django.DjangoModelFactory):
+    class Meta:
+        model = models.DeleteGroupsetJob
+    groupset = SubFactory(GroupsetFactory)
