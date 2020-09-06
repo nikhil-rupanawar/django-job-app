@@ -334,36 +334,13 @@ class AbstractJobProgressMixin(models.Model):
         self._progress_percent = value
 
 
-class AbstractProgressJob(AbstractJob, AbstractJobProgressMixin):
-    class Meta:
-        abstract = True
+class StepStageJobMixin(abc.ABCMeta):
 
-
-class AbstractDiagnostic(models.Model):
-    class Meta:
-        abstract = True
-
-    severity = models.IntegerField(default=Severity.INFO)
-    created_at =  models.DateTimeField(auto_now_add=True)
-    details = models.JSONField(null=True)
-    stage = models.CharField(null=True, blank=True, max_length=50)
-    step = models.CharField(null=True, blank=True, max_length=50)
-
-
-class StepDiagnosticJobMixin:
-    
-    STEP_DIAGNOSTIC_RELATED_NAME = 'diagnostics'
-
-    @property
-    def _rel_diagnostics(self):
-        return getattr(self, self.DIAGNOSTIC_RELATED_NAME)
-
+    @abstractmethod
     def step_success(self, step, **step_data):
-        return self._rel_diagnostics.create(
-            step=step,
-            details=step_data,
-        )
+        ...
 
+    @abstractmethod
     def step_fail(
         self,
         step,
@@ -371,43 +348,32 @@ class StepDiagnosticJobMixin:
         raise_error=True,
         **step_data
     ):
-        obj = self._rel_diagnostics.create(
-            step=step,
-            severity=severity,
-            details=step_data,
-        )
         if raise_error:
             raise JobStepFailedError(step)
-        return obj
 
     @contextmanager
-    def announce_step(self, step, **stage_data):
+    def step_context(self, step, **stage_data):
         self.step_start(stage)
         try:
             yield
         finally:
             self.step_end(stage)
 
-    AnnounceStep = announce_step
+    StepContext = step_context
 
-    def step_start(self, stage, message='Step stared.'):
-        return self._rel_diagnostics.create(
-            step=step,
-            details=dict(message=message),
-        )
+    @abstractmethod
+    def stage_start(self, stage, message='Step stared.'):
+        ...
 
+    @abstractmethod
     def step_end(self, stage, message='Step completed.'):
-        return self._rel_diagnostics.create(
-            step=step,
-            details=dict(message=message),
-        )
+        ...
 
+    @abstractmethod
     def stage_success(self, stage, **stage_data):
-        return self._rel_diagnostics.create(
-            stage=stage,
-            details=stage_data
-        )
+        ...
 
+    @abstractmethod
     def stage_fail(
         self,
         stage,
@@ -415,19 +381,16 @@ class StepDiagnosticJobMixin:
         raise_error=True,
         **stage_data
     ):
-        obj = self._rel_diagnostics.create(
-            *args,
-            stage=stage,
-            severity=severity,
-            details=stage_data,
-        )
+        ...
 
+    @abstractmethod
     def stage_start(self, stage, message='Stage stared.'):
         return self._rel_diagnostics.create(
             stage=stage,
             details=dict(message=message),
         )
 
+    @abstractmethod
     def stage_end(self, stage, message='Stage completed.'):
         return self._rel_diagnostics.create(
             stage=stage,
@@ -435,15 +398,32 @@ class StepDiagnosticJobMixin:
         )
 
     @contextmanager
-    def announce_stage(self, stage, **stage_data):
+    def stage_context(self, stage, **stage_data):
         self.stage_start(stage)
         try:
             yield
         finally:
             self.stage_end(stage)
 
-    def determine_job_status_from_diagnostics(self):
-        if self._rel_diagnostics.objects.filter(severity=Severity.CRITICAL).exists():
-            return JobStatus.FAILED
-        return JobStatus.SUCCESS
-    AnnounceStage = announce_step
+    StageContext = stage_context
+
+
+class AbstractStepStageProgressJob(
+    AbstractJob,
+    AbstractJobProgressMixin,
+    StepStageJobMixin
+):
+    class Meta:
+        abstract = True
+
+
+class AbstractDiagnostic(models.Model):
+    class Meta:
+        abstract = True
+    severity = models.IntegerField(default=Severity.INFO)
+    created_at =  models.DateTimeField(auto_now_add=True)
+    details = models.JSONField(null=True)
+    stage = models.CharField(null=True, blank=True, max_length=50)
+    step = models.CharField(null=True, blank=True, max_length=50)
+
+

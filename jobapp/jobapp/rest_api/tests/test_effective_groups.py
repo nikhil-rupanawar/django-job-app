@@ -18,6 +18,9 @@ class TestDbRelationships(TestCase):
         self.user = user
         self.groupset = groupset
 
+        g = factories.GroupsetFactory.build()
+        g.save_async()
+
     def tearDown(self):
         self.groupset.delete()
         self.user.delete()
