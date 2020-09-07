@@ -1,0 +1,42 @@
+[tripwirevdi\nrupanwar@a-1ih11dp5rwm6m jobapp]$ python3 manage.py test
+Creating test database for alias 'default'...
+System check identified no issues (0 silenced).
+...
+Progress: 9%
+Progress: 18%
+Progress: 27%
+Progress: 36%
+Progress: 45%
+Progress: 54%
+Progress: 63%
+Progress: 72%
+Progress: 81%
+Progress: 90%
+Progress: 100%
+
+######################################################################################
+
+stage=GROUPS_UPDATE | step=None | message=stared | details=None
+stage=None | step=UPDATE_GROUPS | message=succceded | details={}
+stage=GROUPS_UPDATE | step=None | message=succeeded | details={}
+stage=GROUPS_UPDATE | step=None | message=completed. | details=None
+stage=USERS_UPDATE | step=None | message=stared | details=None
+stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'fostermelissa'}}
+stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'sarah51'}}
+stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'rwright'}}
+stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'mmercer'}}
+stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'webbtimothy'}}
+stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'hellis'}}
+stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'christopher51'}}
+stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'marc81'}}
+stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'emoore'}}
+stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'ahenderson'}}
+stage=USERS_UPDATE | step=None | message=succeeded | details={}
+stage=USERS_UPDATE | step=None | message=completed. | details=None
+.
+----------------------------------------------------------------------
+Ran 4 tests in 10.323s
+
+OK
+Destroying test database for alias 'default'...
+

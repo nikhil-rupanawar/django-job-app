@@ -30,8 +30,9 @@ class TestGroupsetJob(TestCase):
         )
         job.save()
         job.run()
-        print("######################################################################################")
+        print()
+        print(f"{'#' * 50} Job Diagnostics {'#' * 50}")
         for dc in job.diagnostics.order_by('id').all():
             print(
-                f'stage={dc.stage} | step={dc.step} | message={dc.message} | details={dc.details}'
+                f'{dc.created_at} stage={dc.stage} | step={dc.step} | message={dc.message} | details={dc.details}'
             )

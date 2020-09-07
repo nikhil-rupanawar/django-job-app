@@ -1,0 +1,32 @@
+System check identified no issues (0 silenced).
+Progress: 9%
+Progress: 18%
+Progress: 27%
+Progress: 36%
+Progress: 45%
+Progress: 54%
+Progress: 63%
+Progress: 72%
+Progress: 81%
+Progress: 90%
+Progress: 100%
+
+################################################## Job Diagnostics ##################################################
+
+2020-09-07 10:58:40.293878+00:00 stage=GROUPS_UPDATE | step=None | message=started | details=None
+2020-09-07 10:58:40.296599+00:00 stage=GROUPS_UPDATE | step=UPDATE_GROUPS | message=succceded | details={}
+2020-09-07 10:58:40.299194+00:00 stage=GROUPS_UPDATE | step=None | message=succeeded | details=None
+2020-09-07 10:58:40.300102+00:00 stage=GROUPS_UPDATE | step=None | message=completed. | details=None
+2020-09-07 10:58:40.301001+00:00 stage=USERS_UPDATE | step=None | message=started | details=None
+2020-09-07 10:58:40.304770+00:00 stage=USERS_UPDATE | step=ADD_USER | message=succceded | details={'data': {'username': 'oconnellamanda'}}
+2020-09-07 10:58:41.311358+00:00 stage=USERS_UPDATE | step=ADD_USER | message=succceded | details={'data': {'username': 'teresa88'}}
+2020-09-07 10:58:42.318098+00:00 stage=USERS_UPDATE | step=ADD_USER | message=succceded | details={'data': {'username': 'kchan'}}
+2020-09-07 10:58:43.324561+00:00 stage=USERS_UPDATE | step=ADD_USER | message=succceded | details={'data': {'username': 'lindsaywalters'}}
+2020-09-07 10:58:44.331507+00:00 stage=USERS_UPDATE | step=ADD_USER | message=succceded | details={'data': {'username': 'jason34'}}
+2020-09-07 10:58:45.339078+00:00 stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'username': 'jalvarez'}}
+2020-09-07 10:58:46.345847+00:00 stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'username': 'onealnorma'}}
+2020-09-07 10:58:47.352640+00:00 stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'username': 'melissanash'}}
+2020-09-07 10:58:48.359348+00:00 stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'username': 'richardgreen'}}
+2020-09-07 10:58:49.366015+00:00 stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'username': 'wthompson'}}
+2020-09-07 10:58:50.370104+00:00 stage=USERS_UPDATE | step=None | message=succeeded | details=None
+2020-09-07 10:58:50.371194+00:00 stage=USERS_UPDATE | step=None | message=completed. | details=None

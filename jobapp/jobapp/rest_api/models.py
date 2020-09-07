@@ -85,55 +85,57 @@ class GroupsetJob(Job):
 
     groupset = models.ForeignKey(Groupset, on_delete=models.SET_NULL, null=True)
 
-    def step_success(self, step, **data):    
+    def step_success(self):    
         return self.diagnostics.create(
             job=self,
-            step=step,
+            step=self.current_step,
+            stage=self.current_stage,
             message='succceded',
-            details=data,
+            details=self.current_step_data,
         )
 
-    def step_fail(self, step, **data):
+    def step_fail(self):
         return self.diagnostics.create(
             job=self,
-            step=step,
+            step=self.current_step,
+            stage=self.current_stage,
             severity=Severity.CRITICAL,
             message='failed',
-            details=data,
+            details=self.current_step_data,
         )
 
-    def step_end(self, step, progress_done_units=1, **data):
-        self.add_progress_done_units(progress_done_units)
+    def step_end(self):
+        self.add_progress_done_units(1)
         print(f'Progress: {int(self.percent_progress)}%')
 
-    def stage_success(self, stage, **data):
+    def stage_success(self):
         return self.diagnostics.create(
             job=self,
-            stage=stage,
+            stage=self.current_stage,
             message='succeeded',
-            details=data
         )
 
-    def stage_fail(self, stage, **data):
+    def stage_fail(self):
         self.diagnostics.create(
             job=self,
-            stage=stage,
+            stage=self.current_stage,
+            step=self.current_step,
             severity=Severity.CRITICAL,
-            details=data,
+            details=self.current_step_data,
         )
-        super().stage_fail(stage, **data)
+        super().stage_fail()
 
-    def stage_start(self, stage, **data):
+    def stage_start(self):
         return self.diagnostics.create(
             job=self,
-            stage=stage,
-            message='stared',
+            stage=self.current_stage,
+            message='started',
         )
 
-    def stage_end(self, stage, **data):
+    def stage_end(self):
         return self.diagnostics.create(
             job=self,
-            stage=stage,
+            stage=self.current_stage,
             message='completed.'
         )
 

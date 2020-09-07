@@ -342,60 +342,74 @@ class AbstractJobProgressMixin(models.Model):
 
 class StepStageJobMixin:
 
-    def step_success(self, step, **data):
+    def __init__(self):
+        self.current_stage = None
+        self.current_step = None
+        self.current_stage_data = None
+        self.current_step_data = None
+
+    def step_success(self, *args, **kwargs):
         pass
 
-    def step_fail(self, step, **data):
-        raise JobStepFailedError(step)
+    def step_fail(self, *args, **data):
+        raise JobStepFailedError(self.current_step)
 
     @contextmanager
     def step_context(self, step, **data):
-        self.step_start(step, **data)
+        self.current_step = step
+        self.current_step_data = data
+        self.step_start()
         try:
             yield
         except Exception:
-            self.step_fail(step, **data)
+            self.step_fail()
             raise
         else:
-            self.step_success(step, **data)
+            self.step_success()
         finally:
-            self.step_end(step, **data)
+            self.step_end()
+            self.current_step = None
+            self.current_step_data = None
 
     StepContext = step_context
 
-    def step_start(self, stage, **data):
+    def step_start(self, *args, **kwargs):
         pass
 
-    def step_end(self, stage, **data):
+    def step_end(self, *args, **kwargs):
         pass
 
-    def stage_start(self, stage, **data):
+    def stage_start(self, *args, **kwargs):
         pass
 
-    def stage_end(self, stage, **data):
+    def stage_end(self, *args, **kwargs):
         pass
 
-    def stage_success(self, stage, **data):
+    def stage_success(self, *args, **kwargs):
         pass
 
-    def stage_fail(self, stage, **data):
-        raise JobStageFailedError(stage)
+    def stage_fail(self, *args, **kwargs):
+        raise JobStageFailedError(self.current_stage)
 
     @contextmanager
     def stage_context(self, stage, **data):
-        self.stage_start(stage, **data)
+        self.current_stage = stage
+        self.current_stage_data = data
+        self.stage_start()
         try:
             yield
         except Exception as e:
             data.update(
                 {'error': str(e) }
             )
-            self.stage_fail(stage, **data)
+            self.stage_fail()
             raise
         else:
-            self.stage_success(stage, **data)
+            self.stage_success()
         finally:
-            self.stage_end(stage, **data)
+            self.stage_end()
+            self.current_stage = None
+            self.current_stage_data = None
 
     StageContext = stage_context
 
