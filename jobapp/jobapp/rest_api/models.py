@@ -6,6 +6,7 @@ from django.db import transaction
 from django.db import models
 from jobapp.jobapp.models import (
     AbstractStepStageProgressJob,
+    AbstractStepStageDiagnostic,
     AbstractDiagnostic,
     Severity
 )
@@ -46,22 +47,6 @@ class Groupset(models.Model):
     name = models.CharField(max_length=255)
     users = models.ManyToManyField(User, related_name='groupsets')
     groups = models.ManyToManyField(Group, related_name='groupsets')
-
-    # def create_update_job(
-    #     self,
-    #     add_users=None,
-    #     remove_users=None,
-    #     add_groups=None,
-    #     remove_groups=None,
-    # ):
-    #     if self._state.adding is True:
-    #         JobCls = CreateGroupsetJob
-    #     else:
-    #         JobCls = UpdateGroupsetJob
-
-    #     JobCls(data=dict(
-            
-    #     ))
         
 
 # Base model for all job model/table
@@ -70,7 +55,7 @@ class Job(AbstractStepStageProgressJob):
 
 
 # Diagnostics for all jobs
-class JobDiagnostic(AbstractStepStageProgressJob):
+class JobDiagnostic(AbstractStepStageDiagnostic):
     job = models.ForeignKey(
         Job,
         on_delete=models.CASCADE,
@@ -90,60 +75,66 @@ class GroupsetJob(Job):
     class Step(models.TextChoices):
         ADD_USER = 'ADD_USER'
         REMOVE_USER = 'REMOVE_USER'
-        GROUPS_UPDATE = 'GROUPS_UPADTE'
+        UPDATE_GROUPS = 'UPDATE_GROUPS'
         DELETE_GROUPSET = 'DELETE_GROUPSET'
 
     class Stage(models.TextChoices):
         USERS_UPADTE = 'USERS_UPDATE'
-        GROUP_UPDATE = 'GROUPS_UPADTE'
-        CREATE_GROUPSET = 'CREATE_GROUPSET'
-        DELETE_GROUPSET = 'DELETE_GROUPSET'
+        GROUPS_UPDATE = 'GROUPS_UPDATE'
+        GROUPSET_DELETE = 'DELETE_GROUPSET'
 
     groupset = models.ForeignKey(Groupset, on_delete=models.SET_NULL, null=True)
 
-    def step_success(self, step, **step_data):    
+    def step_success(self, step, **data):    
         return self.diagnostics.create(
+            job=self,
             step=step,
-            message='step succceded',
-            details=step_data,
+            message='succceded',
+            details=data,
         )
 
-    def step_fail(self, step,**step_data):
+    def step_fail(self, step, **data):
         return self.diagnostics.create(
+            job=self,
             step=step,
             severity=Severity.CRITICAL,
-            message='step failed',
-            details=step_data,
+            message='failed',
+            details=data,
         )
 
-    def step_end(self, step, progress_done_units=1, **step_data):
+    def step_end(self, step, progress_done_units=1, **data):
         self.add_progress_done_units(progress_done_units)
+        print(f'Progress: {int(self.percent_progress)}%')
 
-    def stage_success(self, stage, **stage_data):
+    def stage_success(self, stage, **data):
         return self.diagnostics.create(
+            job=self,
             stage=stage,
-            message='Stage succeeded',
-            details=stage_data
+            message='succeeded',
+            details=data
         )
 
-    def stage_fail(self, stage, **stage_data):
+    def stage_fail(self, stage, **data):
         self.diagnostics.create(
+            job=self,
             stage=stage,
             severity=Severity.CRITICAL,
-            details=stage_data,
+            details=data,
         )
-        super().stage_fail(step, **step_data)
+        super().stage_fail(stage, **data)
 
-    def stage_start(self, stage, **stage_data):
+    def stage_start(self, stage, **data):
         return self.diagnostics.create(
+            job=self,
             stage=stage,
-            message='stage stared',
+            message='stared',
         )
 
-    def stage_end(self, stage, message='Stage completed.'):
+    def stage_end(self, stage, **data):
         return self.diagnostics.create(
+            job=self,
             stage=stage,
-            message='stage completed.'
+            message='completed.'
         )
 
     def _job_status_from_diagnostics(self):
@@ -154,7 +145,7 @@ class GroupsetJob(Job):
     def add_user(self, user):
         with self.StepContext(
             self.Step.ADD_USER,
-            step_data=dict(username=user.username)
+            data=dict(username=user.username)
         ):
             with transaction.atomic():
                 self.groupset.users.remove(user)
@@ -163,44 +154,47 @@ class GroupsetJob(Job):
     def remove_user(self, user):
        with self.StepContext(
             self.Step.REMOVE_USER,
-            step_data=dict(username=user.username)
+            data=dict(username=user.username)
         ):
             with transaction.atomic():
                 self.groupset.users.remove(user)
                 self.groupset.save()
 
     def update_users(self, add_users, remove_users):
-        with self.StageContext(self.Stage.USERS_UPDATE):
+        with self.StageContext(self.Stage.USERS_UPADTE):
             for user in add_users:
-                self.step_add_user(user)
+                self.add_user(user)
+                time.sleep(1)
             for user in remove_users:
-                self.step_remove_user(user)
+                self.remove_user(user)
+                time.sleep(1)
 
     def update_groups(self, add_groups, remove_groups):
-        with self.StageContext(self.Stage.GROUP_UPADTE):
-            with self.StepContext(self.Step.GROUP_UPADTE):
+        with self.StageContext(self.Stage.GROUPS_UPDATE):
+            with self.StepContext(self.Step.UPDATE_GROUPS):
                 with transaction.atomic():
-                    self.groupset.groups.add(add_groups)
-                    self.groupset.groups.remove(remove_groups)
+                    self.groupset.groups.add(*add_groups)
+                    self.groupset.groups.remove(*remove_groups)
+                    self.groupset.save()
 
     def act(self):
-        add_users = self.groupset.users if '*' in add_group_ids else self.groupset.users.filter(
+        add_users = User.objects.all() if '*' in self.data.get('add_user_ids', []) else User.objects.filter(
             id__in=self.data.get('add_user_ids', [])
         )
-        remove_users = self.groupset.users if '*' in  remove_user_ids else self.groupset.users.filter(
+        remove_users = self.groupset.users if '*' in  self.data.get('remove_user_ids', []) else self.groupset.users.filter(
             id__in=self.data.get('remove_user_ids', [])
         )
-        add_groups = self.groupset.groups if '*' in add_group_ids else self.groupset.groups.filter(
+        add_groups = Group.objects.all() if '*' in self.data.get('add_group_ids', []) else Group.objects.filter(
             id__in=self.data.get('add_group_ids', [])
         )
-        remove_groups = self.groupset.groups if '*' in remove_group_ids else self.groupset.groups.filter(
+        remove_groups = self.groupset.groups if '*' in self.data.get('remove_group_ids', []) else self.groupset.groups.filter(
             id__in=self.data.get('remove_group_ids', [])
         )
-        if add_groups.count() or remove_groups.count():
-            groups_update_units = 1 # add remove group is unit operation
-        else:
-            groups_update_units = 0
-        self.add_progress_total_units(add_users.count() + remove_users.count() + groups_update_units)
+        self.add_progress_total_units(
+            add_users.count()
+            + remove_users.count()
+            + 1 # Groups update runs always so +1
+        )
         self.update_groups(add_groups, remove_groups)
         self.update_users(add_users, remove_users)
 
@@ -208,21 +202,25 @@ class GroupsetJob(Job):
 class ManagerUpdateGroupset(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(
-            GroupsetJob.JobType.UPDATE   
+            type=GroupsetJob.JobType.UPDATE   
         )
 
 
 class UpdateGroupsetJob(GroupsetJob):
-    type = GroupsetJob.JobType.UPDATE
     objects = ManagerUpdateGroupset()
+
     class Meta:
         proxy = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.type = GroupsetJob.JobType.UPDATE
 
 
 class ManagerDeleteGroupsetJob(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(
-            GroupsetJob.JobType.DELETE   
+            type=GroupsetJob.JobType.DELETE   
         )
 
 
@@ -232,6 +230,10 @@ class DeleteGroupsetJob(GroupsetJob):
 
     class Meta:
         proxy = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.type = GroupsetJob.JobType.DELETE
 
     @property
     def data(self):

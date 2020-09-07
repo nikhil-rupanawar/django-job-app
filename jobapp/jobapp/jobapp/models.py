@@ -119,7 +119,7 @@ class AbstractJob(models.Model):
     class Meta:
         abstract = True
 
-    _status = models.IntegerField(null=True)
+    _status = models.IntegerField(null=True, default=JobStatus.PENDING)
     _ui_status = models.CharField(choices=UiStatus.choices, max_length=255)
     _data = models.JSONField(null=True)
     type = models.IntegerField(null=True)
@@ -161,7 +161,7 @@ class AbstractJob(models.Model):
             raise JobFailedError(f'Job failed, reason={reason}')
 
     @notify_update
-    def success(self, notify):
+    def success(self):
         self.update_status(status=JobStatus.SUCCESS)
 
     @notify_update
@@ -262,16 +262,17 @@ class AbstractJob(models.Model):
     def run(self):
         self.acknowledge()
         try:
-            if self.is_cancel_requested():
+            if self.is_cancel_requested:
                 self.cancel()
             else:
                 self.running()
                 self.act()
         except (JobFailedError, JobStageFailedError, JobStepFailedError) as e:
+            #raise
             if self.status != JobStatus.FAILED:
                 self.fail(raise_error=False, reason=e.args[0])
         except JobCanceledError as e:
-            if self.status != JobStatus.FAILED:
+            if self.status != JobStatus.CANCELED:
                 self.cancel(raise_error=False, reason=e.args[0])
         except JobStateError as e:
             logger.exception(e)
@@ -341,55 +342,60 @@ class AbstractJobProgressMixin(models.Model):
 
 class StepStageJobMixin:
 
-    def step_success(self, step, **step_data):
+    def step_success(self, step, **data):
         pass
 
-    def step_fail(self, step, **step_data):
+    def step_fail(self, step, **data):
         raise JobStepFailedError(step)
 
     @contextmanager
-    def step_context(self, step, **step_data):
-        self.step_start(stage, **step_data)
+    def step_context(self, step, **data):
+        self.step_start(step, **data)
         try:
             yield
         except Exception:
-            self.step_fail(step, **step_date)
+            self.step_fail(step, **data)
+            raise
         else:
-            self.step_success(step, **step_data)
+            self.step_success(step, **data)
         finally:
-            self.step_end(stage, **step_data)
+            self.step_end(step, **data)
 
     StepContext = step_context
 
-    def stage_start(self, stage, **stage_data):
+    def step_start(self, stage, **data):
         pass
 
-    def step_end(self, stage, **stage_data):
+    def step_end(self, stage, **data):
         pass
 
-    def stage_success(self, stage, **stage_data):
+    def stage_start(self, stage, **data):
         pass
 
-    def stage_fail(self, stage, **stage_data):
+    def stage_end(self, stage, **data):
+        pass
+
+    def stage_success(self, stage, **data):
+        pass
+
+    def stage_fail(self, stage, **data):
         raise JobStageFailedError(stage)
 
-    def stage_start(self, stage, **stage_data):
-        pass
-
-    def stage_end(self, stage, **stage_data):
-        pass
-
     @contextmanager
-    def stage_context(self, stage, **stage_data):
-        self.stage_start(stage, **stage_data)
+    def stage_context(self, stage, **data):
+        self.stage_start(stage, **data)
         try:
             yield
-        except Exception:
-            self.stage_fail(stage, **stage_data)
+        except Exception as e:
+            data.update(
+                {'error': str(e) }
+            )
+            self.stage_fail(stage, **data)
+            raise
         else:
-            self.stage_success(stage, **stage_data)
+            self.stage_success(stage, **data)
         finally:
-            self.stage_end(stage, **stage_data)
+            self.stage_end(stage, **data)
 
     StageContext = stage_context
 
