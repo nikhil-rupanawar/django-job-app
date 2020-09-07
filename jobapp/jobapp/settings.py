@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'jobapp.jobapp',
     'jobapp.rest_api',
+    'polymorphic',
     'graphene_django',
 ]
 

@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 class User(AbstractUser):
 
+    def sync_with_idp(self):
+        time.sleep(1)
+        print(f"{self} - Successfully synced with okta.")
+
     @property
     def direct_group_names(self):
         return { g.name for g in self.groups.all() }
@@ -53,7 +57,7 @@ class Groupset(models.Model):
 class Job(AbstractStepStageProgressJob):
     pass
 
-
+ 
 # Diagnostics for all jobs
 class JobDiagnostic(AbstractStepStageDiagnostic):
     job = models.ForeignKey(
@@ -68,7 +72,6 @@ class GroupsetJob(Job):
     """ Base class model for groupset user sync job """
 
     class JobType(models.IntegerChoices):
-        CREATE = 1
         UPDATE = 2
         DELETE = 3
 
@@ -95,6 +98,7 @@ class GroupsetJob(Job):
         )
 
     def step_fail(self):
+        self.current_stage_data.update(self.current_step_data)
         return self.diagnostics.create(
             job=self,
             step=self.current_step,
@@ -121,7 +125,7 @@ class GroupsetJob(Job):
             stage=self.current_stage,
             step=self.current_step,
             severity=Severity.CRITICAL,
-            details=self.current_step_data,
+            details=self.current_stage_data
         )
         super().stage_fail()
 
@@ -136,7 +140,7 @@ class GroupsetJob(Job):
         return self.diagnostics.create(
             job=self,
             stage=self.current_stage,
-            message='completed.'
+            message='completed'
         )
 
     def _job_status_from_diagnostics(self):
@@ -152,6 +156,7 @@ class GroupsetJob(Job):
             with transaction.atomic():
                 self.groupset.users.remove(user)
                 self.groupset.save()
+                user.sync_with_idp()
 
     def remove_user(self, user):
        with self.StepContext(
@@ -161,6 +166,7 @@ class GroupsetJob(Job):
             with transaction.atomic():
                 self.groupset.users.remove(user)
                 self.groupset.save()
+                user.sync_with_idp()
 
     def update_users(self, add_users, remove_users):
         with self.StageContext(self.Stage.USERS_UPADTE):

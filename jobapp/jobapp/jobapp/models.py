@@ -43,6 +43,7 @@ class UiStatus(models.TextChoices):
     SUCCESS_WITH_WARNING = 'Success with warning(s)'
     CANCEL_REQUESTED = 'Cancel requested'
     CANCELED = 'Canceled'
+    PAUSED = 'Paused'
 
 
 class Severity(models.IntegerChoices):
@@ -361,7 +362,10 @@ class StepStageJobMixin:
         self.step_start()
         try:
             yield
-        except Exception:
+        except Exception as e:
+            self.current_step_data.update(
+                {'error': str(e) }
+            )
             self.step_fail()
             raise
         else:
@@ -399,7 +403,7 @@ class StepStageJobMixin:
         try:
             yield
         except Exception as e:
-            data.update(
+            self.current_stage_data.update(
                 {'error': str(e) }
             )
             self.stage_fail()
@@ -414,9 +418,24 @@ class StepStageJobMixin:
     StageContext = stage_context
 
 
-class AbstractStepStageProgressJob(
+class AbstractProgressJob(
     AbstractJob,
-    AbstractJobProgressMixin,
+    AbstractJobProgressMixin
+):
+    class Meta:
+        abstract = True
+
+
+class AbstractStepStageJob(
+    AbstractJob,
+    StepStageJobMixin
+):
+    class Meta:
+        abstract = True
+
+
+class AbstractStepStageProgressJob(
+    AbstractProgressJob,
     StepStageJobMixin
 ):
     class Meta:
