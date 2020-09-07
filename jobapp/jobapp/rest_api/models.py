@@ -64,7 +64,23 @@ class Groupset(models.Model):
     #     ))
         
 
-class GroupsetJob(AbstractStepStageProgressJob):
+# Base model for all job model/table
+class Job(AbstractStepStageProgressJob):
+    pass
+
+
+# Diagnostics for all jobs
+class JobDiagnostic(AbstractStepStageProgressJob):
+    job = models.ForeignKey(
+        Job,
+        on_delete=models.CASCADE,
+        related_name='diagnostics'
+    )
+
+
+# MTI (model table inheritance)
+class GroupsetJob(Job):
+    """ Base class model for groupset user sync job """
 
     class JobType(models.IntegerChoices):
         CREATE = 1
@@ -74,10 +90,12 @@ class GroupsetJob(AbstractStepStageProgressJob):
     class Step(models.TextChoices):
         ADD_USER = 'ADD_USER'
         REMOVE_USER = 'REMOVE_USER'
+        GROUPS_UPDATE = 'GROUPS_UPADTE'
+        DELETE_GROUPSET = 'DELETE_GROUPSET'
 
     class Stage(models.TextChoices):
-        GROUP_UPDATE = 'GROUPS_UPADTE'
         USERS_UPADTE = 'USERS_UPDATE'
+        GROUP_UPDATE = 'GROUPS_UPADTE'
         CREATE_GROUPSET = 'CREATE_GROUPSET'
         DELETE_GROUPSET = 'DELETE_GROUPSET'
 
@@ -86,152 +104,84 @@ class GroupsetJob(AbstractStepStageProgressJob):
     def step_success(self, step, **step_data):    
         return self.diagnostics.create(
             step=step,
+            message='step succceded',
             details=step_data,
         )
 
-    def step_fail(
-        self,
-        step,
-        severity=Severity.CRITICAL,
-        raise_error=True,
-        **step_data
-    ):
-        obj = self.diagnostics.create(
+    def step_fail(self, step,**step_data):
+        return self.diagnostics.create(
             step=step,
-            severity=severity,
+            severity=Severity.CRITICAL,
+            message='step failed',
             details=step_data,
         )
-        super().step_fail(
-            step,
-            severity=severity,
-            raise_error=raise_error,
-            step_data=step_data
-        )
-        return obj
 
-    def step_start(self, stage, message='Step stared.'):
-        return self.diagnostics.create(
-            step=step,
-            details=dict(message=message),
-        )
-
-    def step_end(self, stage, message='Step completed.'):
-        return self.diagnostics.create(
-            step=step,
-            details=dict(message=message),
-        )
+    def step_end(self, step, progress_done_units=1, **step_data):
+        self.add_progress_done_units(progress_done_units)
 
     def stage_success(self, stage, **stage_data):
         return self.diagnostics.create(
             stage=stage,
+            message='Stage succeeded',
             details=stage_data
         )
 
-    def stage_fail(
-        self,
-        stage,
-        severity=Severity.CRITICAL,
-        raise_error=True,
-        **stage_data
-    ):
-        return self.diagnostics.create(
-            *args,
+    def stage_fail(self, stage, **stage_data):
+        self.diagnostics.create(
             stage=stage,
-            severity=severity,
+            severity=Severity.CRITICAL,
             details=stage_data,
         )
+        super().stage_fail(step, **step_data)
 
-    def stage_start(self, stage, message='Stage stared.'):
+    def stage_start(self, stage, **stage_data):
         return self.diagnostics.create(
             stage=stage,
-            details=dict(message=message),
+            message='stage stared',
         )
 
     def stage_end(self, stage, message='Stage completed.'):
         return self.diagnostics.create(
             stage=stage,
-            details=dict(message=message),
+            message='stage completed.'
         )
 
-    def job_status_from_diagnostics(self):
+    def _job_status_from_diagnostics(self):
         if self.diagnostics.objects.filter(severity=Severity.CRITICAL).exists():
             return JobStatus.FAILED
         return JobStatus.SUCCESS
 
     def add_user(self, user):
-        try:
+        with self.StepContext(
+            self.Step.ADD_USER,
+            step_data=dict(username=user.username)
+        ):
             with transaction.atomic():
                 self.groupset.users.remove(user)
                 self.groupset.save()
-        except Exception as e:
-            self.step_fail(            
-                self.Step.ADD_USER,
-                groupset_name=self.groupset.name,
-                username=user.username,
-                raise_error=False
-            )
-        else:
-            self.step_success(            
-                self.Step.ADD_USER,
-                groupset_name=self.groupset.name,
-                username=user.username,
-            )
-        self.add_done_units(1)
 
     def remove_user(self, user):
-        try:
+       with self.StepContext(
+            self.Step.REMOVE_USER,
+            step_data=dict(username=user.username)
+        ):
             with transaction.atomic():
                 self.groupset.users.remove(user)
                 self.groupset.save()
-        except Exception as e:
-            self.step_fail(            
-                self.Step.REMOVE_USER,
-                groupset_name=self.groupset.name,
-                username=user.username,
-                raise_error=False
-            )
-        else:
-            self.step_success(            
-                self.Step.REMOVE_USER,
-                groupset_name=self.groupset.name,
-                username=user.username,
-            )
-        self.add_done_units(1)
-
-    @property
-    def data(self):
-        # TODO real data
-        return {
-            'assign_group_ids': [1, 4],
-            'remove_group_ids': [7, 8],
-            'add_user_ids': [1, 2, 3, 5],
-            'remove_user_ids': [4, 6],
-        }
 
     def update_users(self, add_users, remove_users):
         with self.StageContext(self.Stage.USERS_UPDATE):
-            try:
-                for user in add_users:
-                    self.step_add_user(user)
-                for user in remove_users:
-                    self.step_remove_user(user)
-            except Exception as e:
-                logger.exception(e)
-                self.stage_fail(GroupsetJobDiagnostic.Stage.USERS_UPDATE)
-            else:
-                self.stage_success(GroupsetJobDiagnostic.Stage.USERS_UPDATE)
+            for user in add_users:
+                self.step_add_user(user)
+            for user in remove_users:
+                self.step_remove_user(user)
 
     def update_groups(self, add_groups, remove_groups):
-        with self.AnnounceStage(self.Stage.GROUP_UPADTE):
-            try:
+        with self.StageContext(self.Stage.GROUP_UPADTE):
+            with self.StepContext(self.Step.GROUP_UPADTE):
                 with transaction.atomic():
                     self.groupset.groups.add(add_groups)
                     self.groupset.groups.remove(remove_groups)
-            except Exception as e:
-                logger.exception(e)
-                self.stage_fail(self.Stage.GROUP_UPADTE)
-            else:
-                self.stage_success(self.Stage.GROUP_UPADTE)
 
     def act(self):
         add_users = self.groupset.users if '*' in add_group_ids else self.groupset.users.filter(
@@ -246,46 +196,19 @@ class GroupsetJob(AbstractStepStageProgressJob):
         remove_groups = self.groupset.groups if '*' in remove_group_ids else self.groupset.groups.filter(
             id__in=self.data.get('remove_group_ids', [])
         )
-
-        self.add_total_units(
-            add_groups.count() +
-            remove_groups.count() +
-            add_users.count() +
-            remove_users.count()
-        )
-
+        if add_groups.count() or remove_groups.count():
+            groups_update_units = 1 # add remove group is unit operation
+        else:
+            groups_update_units = 0
+        self.add_progress_total_units(add_users.count() + remove_users.count() + groups_update_units)
         self.update_groups(add_groups, remove_groups)
         self.update_users(add_users, remove_users)
-
-
-class ManagerCreateGroupsetJob(models.Manager):
-    def get_queryset(self):
-        return super().get_queryset().filter(
-            GroupsetJob.JobType.CREATE   
-        )
-
-
-class CreateGroupsetJob(GroupsetJob):
-    type = GroupsetJob.JobType.CREATE
-    objects = ManagerCreateGroupsetJob()
-
-    class Meta:
-        proxy = True
-
-    def create_groupset(self):
-        with self.AnnounceStage(self.Stage.CREATE_GROUPSET):
-            try:
-                with transaction.atomic():
-                    self.groupset.delete()
-            except Exception as e:
-                logger.exception(e)
-                self.stage_fail(self.Stage.DELETE_GROUPSET)
 
 
 class ManagerUpdateGroupset(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(
-            GroupsetJob.JobType.CREATE   
+            GroupsetJob.JobType.UPDATE   
         )
 
 
@@ -299,7 +222,7 @@ class UpdateGroupsetJob(GroupsetJob):
 class ManagerDeleteGroupsetJob(models.Manager):
     def get_queryset(self):
         return super().get_queryset().filter(
-            GroupsetJob.JobType.CREATE   
+            GroupsetJob.JobType.DELETE   
         )
 
 
@@ -310,28 +233,27 @@ class DeleteGroupsetJob(GroupsetJob):
     class Meta:
         proxy = True
 
-    def stage_delete_groupset(self):
-        with self.AnnounceStage(self.Stage.DELETE_GROUPSET):
-            try:
+    @property
+    def data(self):
+        return {
+            'remove_group_ids': ['*'],
+            'remove_user_ids': ['*']
+        }
+
+    def delete_groupset(self):
+        with self.StageContext(self.Stage.DELETE_GROUPSET):
+            with self.StepContext(self.Step.DELETE_GROUPSET):
                 with transaction.atomic():
                     self.groupset.delete()
-            except Exception as e:
-                logger.exception(e)
-                self.stage_fail(self.Stage.DELETE_GROUPSET)
 
     def act(self):
-        self.add_total_units(1)
+        # additional unit to delete groupset
+        self.add_progress_total_units(1)
         super().act()
-        self.stage_delete_groupset()
-        self.add_done_units(1)
+        self.delete_groupset()
 
 
-class GroupsetJobDiagnostic(AbstractDiagnostic):
-    job = models.ForeignKey(
-        GroupsetJob,
-        on_delete=models.CASCADE,
-        related_name='diagnostics'
-    )
+
 
 
 # if __name__ == "__main__":

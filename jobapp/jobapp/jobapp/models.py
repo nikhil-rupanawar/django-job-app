@@ -84,7 +84,7 @@ class JobCanceledError(JobStateError):
     pass
 
 
-class AbstractJobNotifier(abc.ABCMeta):
+class AbstractJobNotifier(abc.ABC):
     @abc.abstractmethod
     def notify(self, job):
         ...
@@ -133,6 +133,10 @@ class AbstractJob(models.Model):
         super().__init__(*args, **kwargs)
         if not notifiers:
             self._notifiers = (DbSaveNotifier(),)
+
+    @property
+    def data(self):
+        return self._data
 
     @property
     def status(self):
@@ -299,111 +303,93 @@ class AbstractJobProgressMixin(models.Model):
         abstract = True
     _progress_total_units = models.IntegerField(default=0)
     _progress_done_units = models.IntegerField(default=0)
-    _progress_percent = models.IntegerField(null=True)
+    _percent_progress = models.IntegerField(null=True)
 
     @property
-    def total_units(self):
+    def progress_total_units(self):
         return self._progress_total_units
 
     @property
-    def done_units(self):
+    def progress_done_units(self):
         return self._progress_done_units
 
-    def add_total_units(self, units):
+    def add_progress_total_units(self, units):
         self._progress_total_units += units
 
-    @notify_update
-    def add_done_units(self, units):
+    def add_progress_done_units(self, units, notify=True):
         self._progress_done_units += units
+        if notify:
+            self.notify()
 
     @property
-    def remaining_units(self):
-        return self.total_units - self.done_units
+    def remaining_progress_units(self):
+        return self.progress_total_units - self.progress_done_units
 
     @property
-    def progress_percent(self):
-        if self._progress_percent is not None:
-            return self._progress_percent
-        if self.total_units == 0:
+    def percent_progress(self):
+        if self._percent_progress is not None:
+            return self._percent_progress
+        if self.progress_total_units == 0:
             return 0
-        return (self.done_units * 100) / self.total_units
+        return (self.progress_done_units * 100) / self.progress_total_units
  
-    @progress_percent.setter
-    def progress_percent(self, value: int):
+    @percent_progress.setter
+    def percent_progress(self, value: int):
         assert 0 <= value <= 100
-        self._progress_percent = value
+        self._percent_progress = value
 
 
-class StepStageJobMixin(abc.ABCMeta):
+class StepStageJobMixin:
 
-    @abstractmethod
     def step_success(self, step, **step_data):
-        ...
+        pass
 
-    @abstractmethod
-    def step_fail(
-        self,
-        step,
-        severity=Severity.CRITICAL,
-        raise_error=True,
-        **step_data
-    ):
-        if raise_error:
-            raise JobStepFailedError(step)
+    def step_fail(self, step, **step_data):
+        raise JobStepFailedError(step)
 
     @contextmanager
-    def step_context(self, step, **stage_data):
-        self.step_start(stage)
+    def step_context(self, step, **step_data):
+        self.step_start(stage, **step_data)
         try:
             yield
+        except Exception:
+            self.step_fail(step, **step_date)
+        else:
+            self.step_success(step, **step_data)
         finally:
-            self.step_end(stage)
+            self.step_end(stage, **step_data)
 
     StepContext = step_context
 
-    @abstractmethod
-    def stage_start(self, stage, message='Step stared.'):
-        ...
+    def stage_start(self, stage, **stage_data):
+        pass
 
-    @abstractmethod
-    def step_end(self, stage, message='Step completed.'):
-        ...
+    def step_end(self, stage, **stage_data):
+        pass
 
-    @abstractmethod
     def stage_success(self, stage, **stage_data):
-        ...
+        pass
 
-    @abstractmethod
-    def stage_fail(
-        self,
-        stage,
-        severity=Severity.CRITICAL,
-        raise_error=True,
-        **stage_data
-    ):
-        ...
+    def stage_fail(self, stage, **stage_data):
+        raise JobStageFailedError(stage)
 
-    @abstractmethod
-    def stage_start(self, stage, message='Stage stared.'):
-        return self._rel_diagnostics.create(
-            stage=stage,
-            details=dict(message=message),
-        )
+    def stage_start(self, stage, **stage_data):
+        pass
 
-    @abstractmethod
-    def stage_end(self, stage, message='Stage completed.'):
-        return self._rel_diagnostics.create(
-            stage=stage,
-            details=dict(message=message),
-        )
+    def stage_end(self, stage, **stage_data):
+        pass
 
     @contextmanager
     def stage_context(self, stage, **stage_data):
-        self.stage_start(stage)
+        self.stage_start(stage, **stage_data)
         try:
             yield
+        except Exception:
+            self.stage_fail(stage, **stage_data)
+        else:
+            self.stage_success(stage, **stage_data)
         finally:
-            self.stage_end(stage)
+            self.stage_end(stage, **stage_data)
 
     StageContext = stage_context
 
@@ -422,8 +408,12 @@ class AbstractDiagnostic(models.Model):
         abstract = True
     severity = models.IntegerField(default=Severity.INFO)
     created_at =  models.DateTimeField(auto_now_add=True)
+    message = models.CharField(null=True, blank=True, max_length=255)
     details = models.JSONField(null=True)
+
+
+class AbstractStepStageDiagnostic(AbstractDiagnostic):
+    class Meta:
+        abstract = True
     stage = models.CharField(null=True, blank=True, max_length=50)
     step = models.CharField(null=True, blank=True, max_length=50)
-
-
