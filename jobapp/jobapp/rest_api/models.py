@@ -210,17 +210,17 @@ class GroupsetJob(Job):
 
     def act(self):
         add_users = list(
-            User.objects.all()
+            User.objects.all() # TODO: by tenant
             if '*' in self.data.get('add_user_ids', [])
             else User.objects.filter(id__in=self.data.get('add_user_ids', []))
         )
         remove_users = list(
-            self.groupset.users
+            self.groupset.users # TODO: by tenant
             if '*' in  self.data.get('remove_user_ids', [])
             else self.groupset.users.filter(id__in=self.data.get('remove_user_ids', []))
         )
         add_groups = list(
-            Group.objects.all()
+            Group.objects.all() # TODO: by tenant
             if '*' in self.data.get('add_group_ids', [])
             else Group.objects.filter(id__in=self.data.get('add_group_ids', []))
         )
