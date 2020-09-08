@@ -159,26 +159,16 @@ class GroupsetJob(Job):
         with transaction.atomic():
             self.groupset.users.remove(user)
             self.groupset.save()
-            raise JobStepFailedError(f'{user} doest not exist.')
             user.sync_with_idp()
 
     def remove_user(self, user):
         with transaction.atomic():
             self.groupset.users.remove(user)
             self.groupset.save()
+            raise JobStepFailedError(f'{user} doest not exist.')
             user.sync_with_idp()
 
     def update_users(self, add_users, remove_users):
-        for user in add_users:
-            try:
-                with self.StepContext(
-                    self.Step.ADD_USER,
-                    data=dict(username=user.username, user_id=user.id)
-                ):
-                    self.add_user(user)
-            except JobStepFailedError as e:
-                pass
-
         for user in remove_users:
             try:
                 with self.StepContext(
@@ -186,6 +176,16 @@ class GroupsetJob(Job):
                     data=dict(username=user.username, user_id=user.id)
                 ):
                     self.remove_user(user)
+            except JobStepFailedError as e:
+                pass
+
+        for user in add_users:
+            try:
+                with self.StepContext(
+                    self.Step.ADD_USER,
+                    data=dict(username=user.username, user_id=user.id)
+                ):
+                    self.add_user(user)
             except JobStepFailedError as e:
                 pass
 
