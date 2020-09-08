@@ -37,6 +37,6 @@ class TestGroupsetJob(TestCase):
         print(f"{'#' * 50} Job Diagnostics {'#' * 50}")
         for dc in job.diagnostics.order_by('id').all():
             print(
-                f'{dc.created_at} stage={dc.stage} | step={dc.step} | message={dc.message} | details={dc.details}'
+                f'[{dc.created_at}] | severity={dc.severity} | stage={dc.stage} | step={dc.step} | message={dc.message} | details={dc.details}'
             )
         print(job.to_dict())

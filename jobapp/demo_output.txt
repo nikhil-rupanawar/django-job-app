@@ -1,42 +1,64 @@
-python3 manage.py test
-Creating test database for alias 'default'...
 System check identified no issues (0 silenced).
-...
-Progress: 9%
-Progress: 18%
-Progress: 27%
-Progress: 36%
-Progress: 45%
-Progress: 54%
-Progress: 63%
-Progress: 72%
-Progress: 81%
+Progress: 10%
+Progress: 20%
+Progress: 30%
+Progress: 40%
+Progress: 50%
+derekbrown - Successfully synced with okta.
+Progress: 60%
+solisjanet - Successfully synced with okta.
+Progress: 70%
+marcus61 - Successfully synced with okta.
+Progress: 80%
+robert35 - Successfully synced with okta.
 Progress: 90%
+terrygonzales - Successfully synced with okta.
 Progress: 100%
 
-######################################################################################
+################################################## Job Diagnostics ##################################################
+[2020-09-08 08:34:10.247217+00:00] | severity=1 | stage=USERS_UPDATE | step=None | message=started | details=None
+[2020-09-08 08:34:10.251478+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 9, 'username': 'andrew09'}, 'error': 'andrew09 doest not exists'}
+[2020-09-08 08:34:10.256314+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 10, 'username': 'cooklisa'}, 'error': 'cooklisa doest not exists'}
+[2020-09-08 08:34:10.261547+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 11, 'username': 'ifisher'}, 'error': 'ifisher doest not exists'}
+[2020-09-08 08:34:10.266475+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 12, 'username': 'andrewwebb'}, 'error': 'andrewwebb doest not exists'}
+[2020-09-08 08:34:10.271170+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 13, 'username': 'angelabaker'}, 'error': 'angelabaker doest not exists'}
+[2020-09-08 08:34:11.278508+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 4, 'username': 'derekbrown'}}
+[2020-09-08 08:34:12.285028+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 5, 'username': 'solisjanet'}}
+[2020-09-08 08:34:13.291738+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 6, 'username': 'marcus61'}}
+[2020-09-08 08:34:14.298403+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 7, 'username': 'robert35'}}
+[2020-09-08 08:34:15.304985+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 8, 'username': 'terrygonzales'}}
+[2020-09-08 08:34:15.308040+00:00] | severity=1 | stage=USERS_UPDATE | step=None | message=succeeded | details=None
+[2020-09-08 08:34:15.308959+00:00] | severity=1 | stage=USERS_UPDATE | step=None | message=completed | details=None
+{'id': 1, '_status': 7, '_ui_status': 'Success', '_data': {'add_user_ids': [9, 10, 11, 12, 13], 'remove_user_ids': [4, 5, 6, 7, 8]}, 'type': 2, 'created_by': '', 'description': None, 'created_at': datetime.datetime(2020, 9, 8, 8, 34, 10, 235935, tzinfo=<UTC>), 'updated_at': datetime.datetime(2020, 9, 8, 8, 34, 15, 309317, tzinfo=<UTC>), 'ttl': 259200, '_progress_total_units': 10, '_progress_done_units': 10, '_percent_progress': None, 'job_ptr_id': 1, 'groupset_id': 4}
+System check identified no issues (0 silenced).
+Progress: 10%
+Progress: 20%
+Progress: 30%
+Progress: 40%
+Progress: 50%
+andersonmichael - Successfully synced with okta.
+Progress: 60%
+justinjackson - Successfully synced with okta.
+Progress: 70%
+schmidtcharles - Successfully synced with okta.
+Progress: 80%
+devin74 - Successfully synced with okta.
+Progress: 90%
+matthewramirez - Successfully synced with okta.
+Progress: 100%
 
-stage=GROUPS_UPDATE | step=None | message=stared | details=None
-stage=None | step=UPDATE_GROUPS | message=succceded | details={}
-stage=GROUPS_UPDATE | step=None | message=succeeded | details={}
-stage=GROUPS_UPDATE | step=None | message=completed. | details=None
-stage=USERS_UPDATE | step=None | message=stared | details=None
-stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'fostermelissa'}}
-stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'sarah51'}}
-stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'rwright'}}
-stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'mmercer'}}
-stage=None | step=ADD_USER | message=succceded | details={'data': {'username': 'webbtimothy'}}
-stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'hellis'}}
-stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'christopher51'}}
-stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'marc81'}}
-stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'emoore'}}
-stage=None | step=REMOVE_USER | message=succceded | details={'data': {'username': 'ahenderson'}}
-stage=USERS_UPDATE | step=None | message=succeeded | details={}
-stage=USERS_UPDATE | step=None | message=completed. | details=None
-.
-----------------------------------------------------------------------
-Ran 4 tests in 10.323s
-
-OK
-Destroying test database for alias 'default'...
-
+################################################## Job Diagnostics ##################################################
+[2020-09-08 09:24:17.694373+00:00] | severity=1 | stage=USERS_UPDATE | step=None | message=started | details=None
+[2020-09-08 09:24:17.698762+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 9, 'username': 'kimberlycarrillo'}, 'error': 'kimberlycarrillo doest not exist.'}
+[2020-09-08 09:24:17.703879+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 10, 'username': 'olong'}, 'error': 'olong doest not exist.'}
+[2020-09-08 09:24:17.708962+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 11, 'username': 'darrenwilliams'}, 'error': 'darrenwilliams doest not exist.'}
+[2020-09-08 09:24:17.714106+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 12, 'username': 'david93'}, 'error': 'david93 doest not exist.'}
+[2020-09-08 09:24:17.719154+00:00] | severity=3 | stage=USERS_UPDATE | step=ADD_USER | message=failed | details={'data': {'user_id': 13, 'username': 'ryan78'}, 'error': 'ryan78 doest not exist.'}
+[2020-09-08 09:24:18.726407+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 4, 'username': 'andersonmichael'}}
+[2020-09-08 09:24:19.733061+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 5, 'username': 'justinjackson'}}
+[2020-09-08 09:24:20.739194+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 6, 'username': 'schmidtcharles'}}
+[2020-09-08 09:24:21.745809+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 7, 'username': 'devin74'}}
+[2020-09-08 09:24:22.752442+00:00] | severity=1 | stage=USERS_UPDATE | step=REMOVE_USER | message=succceded | details={'data': {'user_id': 8, 'username': 'matthewramirez'}}
+[2020-09-08 09:24:22.755305+00:00] | severity=1 | stage=USERS_UPDATE | step=None | message=succeeded | details=None
+[2020-09-08 09:24:22.756211+00:00] | severity=1 | stage=USERS_UPDATE | step=None | message=completed | details=None
+{'id': 1, '_progress_total_units': 10, '_progress_done_units': 10, '_percent_progress': None, '_status': 5, '_ui_status': 'Failed', '_data': {'add_user_ids': [9, 10, 11, 12, 13], 'remove_user_ids': [4, 5, 6, 7, 8]}, 'type': 2, 'created_by': '', 'description': None, 'created_at': datetime.datetime(2020, 9, 8, 9, 24, 17, 682909, tzinfo=<UTC>), 'updated_at': datetime.datetime(2020, 9, 8, 9, 24, 22, 757708, tzinfo=<UTC>), 'ttl': 259200, 'job_ptr_id': 1, 'groupset_id': 4}

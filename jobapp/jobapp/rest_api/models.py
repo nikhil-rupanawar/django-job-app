@@ -4,12 +4,18 @@ import time
 import enum
 from django.db import transaction
 from django.db import models
-from jobapp.jobapp.models import (
-    AbstractStepStageProgressJob,
-    AbstractStepStageDiagnostic,
-    AbstractDiagnostic,
-    Severity
+from jobapp.jobapp.exceptions import (
+    JobStepFailedError,
+    JobStageFailedError,
+    JobFailedError
 )
+from jobapp.jobapp.models import (
+    AbstractStepProgressJob,
+    AbstractStepDiagnostic,
+    Severity,
+    JobStatus,
+)
+
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.models import Group
 from django.db.models import Count
@@ -54,12 +60,12 @@ class Groupset(models.Model):
         
 
 # Base model for all job model/table
-class Job(AbstractStepStageProgressJob):
+class Job(AbstractStepProgressJob):
     pass
 
  
 # Diagnostics for all jobs
-class JobDiagnostic(AbstractStepStageDiagnostic):
+class JobDiagnostic(AbstractStepDiagnostic):
     job = models.ForeignKey(
         Job,
         on_delete=models.CASCADE,
@@ -88,7 +94,7 @@ class GroupsetJob(Job):
 
     groupset = models.ForeignKey(Groupset, on_delete=models.SET_NULL, null=True)
 
-    def step_success(self):    
+    def on_step_success(self):    
         return self.diagnostics.create(
             job=self,
             step=self.current_step,
@@ -97,9 +103,9 @@ class GroupsetJob(Job):
             details=self.current_step_data,
         )
 
-    def step_fail(self):
+    def on_step_fail(self):
         self.current_stage_data.update(self.current_step_data)
-        return self.diagnostics.create(
+        self.diagnostics.create(
             job=self,
             step=self.current_step,
             stage=self.current_stage,
@@ -107,19 +113,20 @@ class GroupsetJob(Job):
             message='failed',
             details=self.current_step_data,
         )
+        super().on_step_fail()
 
-    def step_end(self):
+    def on_step_end(self):
         self.add_progress_done_units(1)
         print(f'Progress: {int(self.percent_progress)}%')
 
-    def stage_success(self):
+    def on_stage_success(self):
         return self.diagnostics.create(
             job=self,
             stage=self.current_stage,
             message='succeeded',
         )
 
-    def stage_fail(self):
+    def on_stage_fail(self):
         self.diagnostics.create(
             job=self,
             stage=self.current_stage,
@@ -127,16 +134,16 @@ class GroupsetJob(Job):
             severity=Severity.CRITICAL,
             details=self.current_stage_data
         )
-        super().stage_fail()
+        super().on_stage_fail()
 
-    def stage_start(self):
+    def on_stage_start(self):
         return self.diagnostics.create(
             job=self,
             stage=self.current_stage,
             message='started',
         )
 
-    def stage_end(self):
+    def on_stage_end(self):
         return self.diagnostics.create(
             job=self,
             stage=self.current_stage,
@@ -144,46 +151,53 @@ class GroupsetJob(Job):
         )
 
     def _job_status_from_diagnostics(self):
-        if self.diagnostics.objects.filter(severity=Severity.CRITICAL).exists():
+        if self.diagnostics.filter(severity=Severity.CRITICAL).exists():
             return JobStatus.FAILED
         return JobStatus.SUCCESS
 
     def add_user(self, user):
-        with self.StepContext(
-            self.Step.ADD_USER,
-            data=dict(username=user.username)
-        ):
-            with transaction.atomic():
-                self.groupset.users.remove(user)
-                self.groupset.save()
-                user.sync_with_idp()
+        with transaction.atomic():
+            self.groupset.users.remove(user)
+            self.groupset.save()
+            raise JobStepFailedError(f'{user} doest not exist.')
+            user.sync_with_idp()
 
     def remove_user(self, user):
-       with self.StepContext(
-            self.Step.REMOVE_USER,
-            data=dict(username=user.username)
-        ):
-            with transaction.atomic():
-                self.groupset.users.remove(user)
-                self.groupset.save()
-                user.sync_with_idp()
+        with transaction.atomic():
+            self.groupset.users.remove(user)
+            self.groupset.save()
+            user.sync_with_idp()
 
     def update_users(self, add_users, remove_users):
-        with self.StageContext(self.Stage.USERS_UPADTE):
-            for user in add_users:
-                self.add_user(user)
-                time.sleep(1)
-            for user in remove_users:
-                self.remove_user(user)
-                time.sleep(1)
+        for user in add_users:
+            try:
+                with self.StepContext(
+                    self.Step.ADD_USER,
+                    data=dict(username=user.username, user_id=user.id)
+                ):
+                    self.add_user(user)
+            except JobStepFailedError as e:
+                pass
+
+        for user in remove_users:
+            try:
+                with self.StepContext(
+                    self.Step.REMOVE_USER,
+                    data=dict(username=user.username, user_id=user.id)
+                ):
+                    self.remove_user(user)
+            except JobStepFailedError as e:
+                pass
+
+    def add_remove_groups(self, add_groups, remove_groups):
+        with transaction.atomic():
+            self.groupset.groups.add(*add_groups)
+            self.groupset.groups.remove(*remove_groups)
+            self.groupset.save()
 
     def update_groups(self, add_groups, remove_groups):
-        with self.StageContext(self.Stage.GROUPS_UPDATE):
-            with self.StepContext(self.Step.UPDATE_GROUPS):
-                with transaction.atomic():
-                    self.groupset.groups.add(*add_groups)
-                    self.groupset.groups.remove(*remove_groups)
-                    self.groupset.save()
+        with self.StepContext(self.Step.UPDATE_GROUPS):
+            self.add_remove_groups(add_groups, remove_groups)
 
     def act(self):
         add_users = User.objects.all() if '*' in self.data.get('add_user_ids', []) else User.objects.filter(
@@ -198,13 +212,24 @@ class GroupsetJob(Job):
         remove_groups = self.groupset.groups if '*' in self.data.get('remove_group_ids', []) else self.groupset.groups.filter(
             id__in=self.data.get('remove_group_ids', [])
         )
-        self.add_progress_total_units(
-            add_users.count()
-            + remove_users.count()
-            + 1 # Groups update runs always so +1
-        )
-        self.update_groups(add_groups, remove_groups)
-        self.update_users(add_users, remove_users)
+
+        n_users = add_users.count() + remove_users.count()
+        n_groups = add_groups.count() + remove_groups.count()
+        total_units = n_users
+        if n_groups:
+            total_units += 1
+        self.add_progress_total_units(total_units)
+     
+        if n_groups:
+            with self.StageContext(self.Stage.GROUPS_UPDATE):
+                self.update_groups(add_groups, remove_groups)
+        
+        if n_users:
+            with self.StageContext(self.Stage.USERS_UPADTE):
+                self.update_users(add_users, remove_users)
+
+        if self._job_status_from_diagnostics() == JobStatus.FAILED:
+            self.fail('One or more steps failed.')
 
 
 class ManagerUpdateGroupset(models.Manager):
@@ -261,35 +286,3 @@ class DeleteGroupsetJob(GroupsetJob):
         self.add_progress_total_units(1)
         super().act()
         self.delete_groupset()
-
-
-
-
-
-# if __name__ == "__main__":
-
-
-#     ###### Demo create groupset job #####
-#     # Create group
-#     # TODO: transaction handling
-#     groupset = Groupset(name='test')
-#     groupset.save()
-#     # Create a job
-#     job = CreateGroupsetJob(
-#         groupset=groupset,
-#         data=dict(
-#             add_user_ids=[1, 2, 3],
-#             add_group_ids=['*']
-#         )
-#     )
-#     job.save()
-#     # Send job to your prefered async queue 
-#     job.delay()
-
-#     # On daemon side >>>
-#     # You will get it from queue but for demo just convert object to message
-#     message = job.to_message()
-#     job = GroupsetJob.from_message(message)
-#     # just run it! i(t blocks).
-#     job.run()
-    #### End demo create groupset job #####
