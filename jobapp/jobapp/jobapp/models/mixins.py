@@ -1,8 +1,7 @@
 from django.db import  models
 from contextlib import contextmanager
-from ..exceptions import (
-    JobStateError
-)
+from ..exceptions import JobStateError
+
 
 class AbstractProgressJobMixin(models.Model):
     class Meta:

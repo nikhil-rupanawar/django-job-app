@@ -265,25 +265,16 @@ class AbstractJob(models.Model):
             self.finalize()
 
 
-class AbstractProgressJob(
-    AbstractJob,
-    AbstractProgressJobMixin
-):
+class AbstractProgressJob(AbstractJob, AbstractProgressJobMixin):
     class Meta:
         abstract = True
 
 
-class AbstractStepJob(
-    AbstractJob,
-    StepJobMixin
-):
+class AbstractStepJob(AbstractJob, StepJobMixin):
     class Meta:
         abstract = True
 
 
-class AbstractStepProgressJob(
-    AbstractProgressJob,
-    StepJobMixin
-):
+class AbstractStepProgressJob(AbstractProgressJob, StepJobMixin):
     class Meta:
         abstract = True
