@@ -6,13 +6,14 @@ from jobapp.rest_api import models
 class TestGroupsetJob(TestCase):
 
     def setUp(self):
-        self.groupset_groups = factories.GroupFactory.create_batch(5)
-        self.already_added_users = self.remove_users = factories.UserFactory.create_batch(5)
+        self.to_remove_groups = factories.GroupFactory.create_batch(5)
+        self.to_add_groups = factories.GroupFactory.create_batch(5)
+        self.to_remove_users = factories.UserFactory.create_batch(5)
+        self.to_add_users = factories.UserFactory.create_batch(5)
         self.groupset = factories.GroupsetFactory.create(
-            groups=self.groupset_groups,
-            users=self.already_added_users,
+            groups=self.to_remove_groups,
+            users=self.to_remove_users,
         )
-        self.add_users = factories.UserFactory.create_batch(5)
 
     def tearDown(self):
         self.groupset.delete()
@@ -21,8 +22,10 @@ class TestGroupsetJob(TestCase):
 
     def test_update_groupset_users_job(self):
         data = {
-            'add_user_ids': [user.id for user in self.add_users],
-            'remove_user_ids': [user.id for user in self.already_added_users]
+            'add_user_ids': [user.id for user in self.to_add_users],
+            'remove_user_ids': [user.id for user in self.to_remove_users],
+            'add_group_ids': [g.id for g in self.to_add_groups],
+            'remove_group_ids': [g.id for g in self.to_remove_groups]
         }
         job = models.UpdateGroupsetJob(
             groupset=self.groupset,
@@ -40,3 +43,4 @@ class TestGroupsetJob(TestCase):
                 f'[{dc.created_at}] | severity={dc.severity} | stage={dc.stage} | step={dc.step} | message={dc.message} | details={dc.details}'
             )
         print(job.to_dict())
+        self.assertEquals(self.groupset.last_job, job)

@@ -191,6 +191,8 @@ class AbstractJob(models.Model):
 
     @property
     def is_stale(self):
+        if self.status == JobStatus.PENDING:
+            return False
         return self.has_expired
 
     @property

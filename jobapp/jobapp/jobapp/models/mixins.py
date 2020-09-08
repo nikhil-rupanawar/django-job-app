@@ -1,6 +1,6 @@
 from django.db import  models
 from contextlib import contextmanager
-from ..exceptions import JobStateError
+from ..exceptions import JobStateError, JobStageFailedError, JobStepFailedError
 
 
 class AbstractProgressJobMixin(models.Model):
@@ -52,6 +52,12 @@ class StepJobMixin:
         self.current_stage_data = None
         self.current_step_data = None
 
+    def fail_stage(self, reason=''):
+        raise JobStageFailedError(reason)
+
+    def fail_step(self, reason=''):
+        raise JobStepFailedError(reason)
+
     def on_step_success(self, *args, **kwargs):
         pass
 
@@ -73,7 +79,7 @@ class StepJobMixin:
             raise          
         except Exception as e:
             print(e)
-            self.current_data.update(
+            self.current_step_data.update(
                 {'error': str(e) }
             )
             self.on_step_fail()
